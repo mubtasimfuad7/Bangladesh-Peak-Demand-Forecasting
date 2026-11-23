@@ -1,0 +1,13 @@
+numpy>=1.26
+pandas>=2.2
+openpyxl>=3.1
+scipy>=1.13
+scikit-learn>=1.5
+statsmodels>=0.14
+torch>=2.2
+xgboost>=2.1
+lightgbm>=4.3
+shap>=0.46
+matplotlib>=3.9
+streamlit>=1.38
+fpdf2>=2.7

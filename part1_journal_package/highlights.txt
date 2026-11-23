@@ -1,0 +1,7 @@
+Highlights (Elsevier Submission — <= 85 characters per bullet):
+
+- 5-seed Val-Opt ensemble achieves 597.08 +/- 4.35 MW MAE across 16 models.
+- Cuts PatchTST 3-year rolling-origin CV error by 94.1 MW (613.3 vs 707.4 MW).
+- Significant HAC DM gains over SARIMAX, LightGBM, DLinear, XGBoost, and BiGRU.
+- Cuts >15 GW XGBoost error by 49.9% and proves monotonic ablation (-20.4 MW).
+- Beats persistence in 8/8 divisions, prior art in 6/8, and causal 1-30d horizons.
