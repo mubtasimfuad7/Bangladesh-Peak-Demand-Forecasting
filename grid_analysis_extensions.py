@@ -1,12 +1,9 @@
 import os
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import GRU, Dense, Dropout, Flatten, Input, Bidirectional
-from tensorflow.keras.optimizers import Adam
-from sklearn.preprocessing import MinMaxScaler
 
 def main():
     os.makedirs("results", exist_ok=True)
@@ -16,11 +13,13 @@ def main():
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date').set_index('Date')
     
-    print("\n1. Calculating Grid System Loss (Transmission & Distribution waste)...")
-    df['System_Loss_MW'] = df['Max. Demand at eve. peak (Generation end)'] - df['Max. Demand at eve. peak (Sub-station end)']
+    print("\n1. Calculating QA-Filtered Grid System Loss (excluding negative metering inversions)...")
+    raw_loss = df['Max. Demand at eve. peak (Generation end)'] - df['Max. Demand at eve. peak (Sub-station end)']
+    n_neg = int((raw_loss < 0).sum())
+    df['System_Loss_MW'] = raw_loss.where(raw_loss >= 0, np.nan)
     avg_loss_mw = df['System_Loss_MW'].mean()
     avg_loss_pct = (df['System_Loss_MW'] / df['Max. Demand at eve. peak (Generation end)']).mean() * 100
-    print(f"Average Peak Transmission Loss: {avg_loss_mw:.2f} MW ({avg_loss_pct:.2f}% of generation)")
+    print(f"QA Peak Transmission Loss: {avg_loss_mw:.2f} MW ({avg_loss_pct:.2f}% of generation; {n_neg} negative records excluded)")
     
     plt.figure(figsize=(12, 5))
     plt.plot(df['System_Loss_MW'], color='red', alpha=0.7, label='System Loss (MW)')
