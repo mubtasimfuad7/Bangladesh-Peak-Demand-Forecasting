@@ -29,7 +29,7 @@
 
 \begin{frontmatter}
 
-\title{Benchmarking Statistical, Linear, Patched-Transformer, and Recurrent Ensembles with Adaptive Conformal Uncertainty for Multi-Horizon Peak Electricity Demand Forecasting in Bangladesh}
+\title{Benchmarking Statistical, Linear, Patched-Transformer, and Recurrent Models with Adaptive Conformal Uncertainty for Peak Electricity Demand Forecasting in Bangladesh}
 
 \author[nsu]{Mubtasim Fuad}
 \ead{mubtasim.fuad@northsouth.edu}
@@ -46,13 +46,13 @@
 \address[nsu]{Department of Electrical and Computer Engineering, North South University, Dhaka, Bangladesh}
 
 \begin{abstract}
-Accurate short-term load forecasting (STLF) and calibrated uncertainty bounds are essential for economic dispatch and spinning reserve planning in rapidly growing developing grids. We present a reproducible, multi-seed comparative benchmark on 6.5 years of daily operational archives (2,394 reported cycles across 2,414 calendar days, November 2019--June 2026) from the Bangladesh Power Development Board (BPDB). Using train-only Min--Max scaling, 14-day temporal split embargoes, separate validation early-stopping and calibration partitions, and a train-estimated subtropical cooling threshold ($\tau^* = 26.0^\circ\text{C}$), we evaluate 21 models across five random seeds---spanning naive/weekday-adjusted persistence, SARIMAX, L2-regularized Ridge regression on identical lagged features, level and differenced-target GBDTs, DLinear, PatchTST (single and 3-member ensemble), five recurrent/attention networks, residual hybrids, and equal-weight vs. validation-optimized recurrent ensembles.
+We benchmark 24 forecasting models and five conformal uncertainty wrappers on 6.5 years of daily operational evening peak demand records (2,394 reported cycles across 2,414 calendar days, November 2019--June 2026) from the Bangladesh Power Development Board (BPDB). Using train-only scaling, 14-day split embargoes, separated early-stopping (\texttt{Val-ES}) and calibration (\texttt{Val-Cal}) partitions, detrended subtropical cooling degree days ($\tau^* = 25.0^\circ\text{C}$), and matched validation tuning across naive, linear, differenced-target ($\Delta y$), tree, MLP, channel-independent DLinear, PatchTST, and recurrent models, four findings emerge.
 
-Four empirical findings stand out. First, on the 462-day blind test set (March 2025--June 2026), a 3-member \texttt{PatchTST-Ensemble} achieves the lowest error ($574.53 \pm 6.68$\,MW MAE, 4.37\% MAPE, 0.69\,ms CPU latency, and 444.7\,MW MAE above 15\,GW), whereas Ridge regression on the same 118-channel window is highly competitive (599.09\,MW) and outperforms both equal-weight (607.08\,MW) and SLSQP-weighted (619.91\,MW) recurrent ensembles. Second, across 3-fold expanding-window rolling-origin cross-validation (2023--2026), Ridge achieves the lowest 3-fold mean MAE (567.79\,MW), ahead of SARIMAX (598.32\,MW), differenced XGBoost (609.63\,MW), and PatchTST-3$\times$ (647.02\,MW), while an unconfounded fixed-test learning curve (1.5--4.5 years) shows SARIMAX plateauing near 651\,MW as PatchTST-3$\times$ improves monotonically (633.0 to 574.5\,MW). Third, static split conformal prediction under-covers seasonal shift (67.5\% vs. 90\% nominal; 51.2\% in Summer), whereas Locally Normalized Adaptive Conformal Inference (LN-ACI) restores 89.6\% empirical coverage (88.9\%--90.1\% across all four seasons) and reduces the Winkler score by 20.3\%. Fourth, same-split 8-division forecasting, causal 1--30 day horizons (identifying 14 days as the skill ceiling over climatology+trend), direct ensemble permutation importance, and quality-assured transmission loss diagnostics (510.50\,MW mean) establish a transparent benchmark for South Asian grid research.
+First, on the 462-day blind test set (March 2025--June 2026), \texttt{PatchTST-Ensemble} (3$\times$, $584.2 \pm 10.7$\,MW MAE, $841.6$\,MW RMSE, $+7.8\%$ skill over weekday-adjusted persistence), \texttt{PatchTST-Diff} ($589.6$\,MW), \texttt{Ridge} ($602.3$\,MW, $6.40$\,KiB), and \texttt{Equal-Weight RNN} ($603.2$\,MW, $845.2$\,MW RMSE) form a statistically tied leading group inside the 95\% Hansen Model Confidence Set ($p_{\text{MCS}} \ge 0.29$). Second, across 3-fold expanding-window rolling-origin CV (2023--2026), weekday-adjusted persistence ($551.0$\,MW) and \texttt{Ridge-Diff} ($562.8$\,MW) achieve the lowest 3-fold means while deep models degrade sharply in 2023 (\texttt{PatchTST-3$\times$}: $907.7$\,MW). Third, a 5-way conformal ablation on untouched \texttt{Val-Cal} residuals shows that \texttt{Plain ACI} minimizes 90\% Winkler score ($3,636$\,MW, $-25.3\%$ vs. static) at $2,404$\,MW width, whereas \texttt{LN-ACI} yields the tightest seasonal coverage uniformity ($88.1\%$--$90.1\%$) at wider bands ($2,878$\,MW). Fourth, \texttt{Ridge} leads Holiday/Eid days ($867.9$\,MW), \texttt{Equal-Weight RNN} outperforms \texttt{PatchTST-3$\times$} across all eight divisions, and a \texttt{Climatology+Ridge-Residual} hybrid prevents multi-horizon drift beyond 7--14 days.
 \end{abstract}
 
 \begin{keyword}
-Short-term load forecasting \sep Patched Transformer \sep Ridge regression \sep Adaptive conformal inference \sep Bangladesh power grid \sep Multi-horizon forecasting
+Short-term load forecasting \sep Model confidence set \sep Patched Transformer \sep Ridge regression \sep Adaptive conformal inference \sep Bangladesh power grid
 \end{keyword}
 
 \end{frontmatter}
@@ -61,25 +61,18 @@ Short-term load forecasting \sep Patched Transformer \sep Ridge regression \sep 
 % 1. INTRODUCTION
 % =========================================================================
 \section{Introduction}
-Reliable short-term electricity demand forecasting (STLF) underpins secure unit commitment, economic dispatch, spinning reserve sizing, and frequency regulation in modern power systems \citep{hong2016probabilistic,hong2020energy}. Because grid-scale electrical storage remains limited, system operators must continuously balance generation with demand: under-forecasting evening peaks risks frequency excursions and involuntary rotational load shedding, whereas over-forecasting forces utilities to commit expensive peaking capacity unnecessarily.
+Short-term electricity demand forecasting (STLF) and calibrated uncertainty bounds support daily unit commitment, economic dispatch, and spinning-reserve sizing in power systems \citep{hong2016probabilistic,hong2020energy}. In developing grids such as Bangladesh---where installed capacity exceeds 27,000\,MW across imported LNG, coal, and heavy fuel oil plants, yet seasonal heatwaves still trigger regional supply shortfalls \citep{bpdb2025annual}---accurate day-ahead load estimates and season-adaptive uncertainty intervals are directly relevant to daily grid operations.
 
-These operational trade-offs are particularly pronounced in rapidly expanding developing grids such as Bangladesh. Although installed generation capacity exceeds 27,000\,MW---relying heavily on imported liquefied natural gas (LNG), coal, and heavy fuel oil (HFO)---the Bangladesh Power Development Board (BPDB) and the National Load Despatch Centre (NLDC) balance high thermal capacity charges against recurring regional supply shortfalls during subtropical heatwaves \citep{bpdb2025annual}.
+Forecasting daily evening peak demand in Bangladesh entails three distinct operational characteristics: (i) subtropical cooling sensitivity combined with rapid secular load growth ($+780.8$\,MW/yr on the 2019--2024 training archive, lifting national gross peaks from $\sim$11\,GW to 18.4\,GW) that challenges raw-level tree extrapolation; (ii) multi-day urban-to-rural demographic shifts during lunar-calendar Eid-ul-Fitr and Eid-ul-Adha festivals \citep{ziel2018calendar}, whose official dates carry $\pm 1$-day lunar-sighting confirmation uncertainty; and (iii) public archive imperfections including 20 missing reporting dates and occasional substation-metering inversions, alongside strong seasonal heteroscedasticity between calm winters and volatile summers.
 
-Daily evening peak demand forecasting in Bangladesh presents three domain-specific challenges:
+Recent deep time-series models---ranging from bidirectional RNNs \citep{hochreiter1997lstm,cho2014gru,schuster1997birnn,kong2019stlf} to linear/hierarchical decompositions \citep{oreshkin2020nbeats,challu2023nhits,zeng2023dlinear}, temporal 2D/inverted/patched Transformers \citep{wu2023timesnet,nie2023patchtst,liu2024itransformer}, and pretrained time-series foundation models \citep{ansari2024chronos,das2024timesfm}---are frequently reported to outperform classical baselines. However, empirical STLF studies on South Asian grids, including prior work from our own research group \citep{yeaser2025bangladesh}, often omit regularized linear models on identical lag matrices, omit weekday-aware naive baselines and differenced-target ($\Delta y$) formulations, lack multiple-testing-controlled Model Confidence Set (MCS) evaluation \citep{hansen2011mcs}, or rely on static conformal intervals that break under seasonal shift.
+
+Rather than advocating a single winning architecture, this study conducts a controlled, transparent comparative benchmark on 6.5 years of BPDB operational data to map \textit{where} linear, statistical, differenced-tree, patched-Transformer, and recurrent ensembles succeed and fail:
 \begin{enumerate}
-    \item \textbf{Subtropical cooling sensitivity and secular growth:} Ambient daily maximum temperatures in Dhaka exceed $24^\circ\text{C}$ on 93.3\% of days and never fall below $18^\circ\text{C}$ (minimum $19.3^\circ\text{C}$), rendering temperate-climate heating degree days degenerate. Meanwhile, rapid electrification lifted national gross evening peak demand from $\sim$11\,GW in 2019 to over 16\,GW (and up to 18.4\,GW gross unconstrained demand) by 2025--2026, exposing raw-level extrapolation artifacts in decision-tree regressors.
-    \item \textbf{Multi-day holiday migration regimes:} During lunar-calendar festivals (Eid-ul-Fitr and Eid-ul-Adha), millions of residents depart metropolitan Dhaka for regional divisions across multi-day transition windows, temporarily lowering urban industrial demand while shifting regional consumption \citep{ziel2018calendar}. Because Islamic festival dates rely on lunar sighting confirmed approximately one day in advance, holiday schedules carry $\pm 1$-day operational uncertainty relative to tentative annual calendars.
-    \item \textbf{Non-stationary volatility and data-quality artifacts:} Public operational records from developing utilities often contain missing reporting dates (such as nationwide communication disruptions) and occasional substation-metering inversions, while multi-year variance shifts invalidate static uncertainty intervals calibrated on milder seasons.
-\end{enumerate}
-
-Deep sequential architectures---including LSTM \citep{hochreiter1997lstm}, GRU \citep{cho2014gru}, Bidirectional RNNs \citep{schuster1997birnn}, self-attention networks \citep{vaswani2017attention}, and patched Transformers \citep{nie2023patchtst}---have been widely adopted for STLF \citep{kong2019stlf,smyl2020hybrid}. Yet empirical STLF evaluations in South Asia \citep{yeaser2025bangladesh} often omit strong linear and differenced-tree baselines on identical features, report single-seed results without multiple-testing-adjusted significance tests, compare models across non-overlapping datasets, or rely on static uncertainty intervals that fail under seasonal shift.
-
-Rather than claiming universal superiority for a single neural family, this study provides a transparent, reproducible benchmark across 6.5 years of BPDB operational records designed to clarify \textit{when} linear, statistical, differenced-tree, patched-Transformer, and recurrent architectures each excel. Our contributions are:
-\begin{enumerate}
-    \item \textbf{Comprehensive 21-Model, 5-Seed National Benchmark with Fair Baselines:} Under a chronological protocol with train-only scaling, 14-day split embargoes, and separated validation early-stopping (\texttt{Val-ES}) and calibration (\texttt{Val-Cal}) partitions, we benchmark 21 models across five seeds---explicitly including L2-regularized Ridge regression on the identical $14 \times 118$ input tensor, weekday-adjusted persistence, differenced-target XGBoost ($\Delta y$), and a like-for-like 3-member \texttt{PatchTST-Ensemble} alongside recurrent ensembles.
-    \item \textbf{Rolling-Origin Cross-Validation and Unconfounded Learning Curves:} We report 3-fold expanding-window rolling-origin CV (2023, 2024, 2025--2026) honestly across all folds (identifying Ridge as best on the 3-fold mean) and introduce a fixed-test learning curve (1.5 to 4.5 training years on the identical 2025--2026 test period) to separate training-volume scaling from 2023 post-crisis regime shifts.
-    \item \textbf{Adaptive Heteroscedastic Conformal Uncertainty:} We demonstrate that static split conformal prediction under-covers seasonal shifts (67.5\% vs. 90\% nominal; 51.2\% in Summer) and resolve this with Locally Normalized Adaptive Conformal Inference (LN-ACI) \citep{gibbs2021aci}, restoring 89.6\% empirical coverage (88.9\%--90.1\% across all four seasons) with a 20.3\% reduction in Winkler score.
-    \item \textbf{Same-Split Divisional Forecasts, Causal Multi-Horizon Ceilings, Direct Model Explainability, and QA Grid Diagnostics:} We benchmark all eight divisions strictly on the same test split (against Lag-1, Lag-7, Ridge, and a same-split Single BiGRU), evaluate causal direct 1--30 day horizons against both origin persistence and a climatology+trend baseline, explain the deployed PyTorch ensemble directly via group permutation importance, and audit BPDB data gaps and transmission-loss anomalies.
+    \item \textbf{Equalized 24-Model, 5-Seed National Benchmark with Formal MCS Testing:} Under train-only scaling, 14-day split embargoes, separated \texttt{Val-ES} and \texttt{Val-Cal} partitions, and matched \texttt{Val-ES} tuning, we evaluate 24 models---including Ridge, Ridge-Diff ($\Delta y$), Weekday-Adjusted Persistence, XGBoost-Diff, standard channel-independent DLinear, 2-layer MLP, PatchTST (single, 3$\times$, and $\Delta y$ 3$\times$), and recurrent ensembles---evaluated on co-primary MAE and RMSE, Skill Score vs. Weekday-Adjusted Persistence, HLN-adjusted Diebold--Mariano tests, and the 95\% Hansen Model Confidence Set.
+    \item \textbf{Multi-Year Rolling CV and Within-Period History Sensitivity:} We report 3-fold expanding-window CV (2023, 2024, 2025--2026) candidly---showing that Weekday-Adjusted Persistence and Ridge-Diff lead the 3-fold mean while deep models struggle in Fold~1---alongside a within-period sensitivity diagnostic varying trailing training history (1.5--4.5 years) on the 2025--2026 split.
+    \item \textbf{5-Way Conformal Uncertainty Ablation on Untouched Calibration Residuals:} On untouched \texttt{Val-Cal} residuals of both \texttt{PatchTST-3$\times$} and \texttt{Ridge}, we ablate Static Split Conformal, Rolling-Window Conformal (120d), Locally Normalized Static, Plain ACI, and Locally Normalized ACI (LN-ACI) across overall Winkler efficiency and seasonal coverage uniformity.
+    \item \textbf{Coherent Downstream Evaluation on the Leading Group:} We evaluate the same leading models (\texttt{PatchTST-3$\times$}, \texttt{Ridge}, and \texttt{Equal-Weight RNN}) across same-split 8-division forecasts, causal 1--30 day horizons with a \texttt{Climatology+Ridge-Residual} hybrid, feature/PCA ablations, and merged-block direct permutation importance, with robust data-quality grid diagnostics archived in Appendix~A.
 \end{enumerate}
 
 % =========================================================================
@@ -87,15 +80,15 @@ Rather than claiming universal superiority for a single neural family, this stud
 % =========================================================================
 \section{Related Works}
 
-\subsection{Statistical, Linear, Tree-Based, and Deep Sequential STLF}
-Classical STLF frameworks rely on seasonal autoregressive integrated moving average models with exogenous regressors (SARIMAX) \citep{box2015time}, regularized linear models, exponential smoothing, and shallow neural networks \citep{hippert2001neural,almeshaiei2011decomposition,kuster2017electrical}. Because daily national load exhibits strong autoregressive structure, well-regularized linear models (such as Ridge regression) and parsimonious SARIMAX filters remain formidable baselines, particularly under limited training histories or abrupt macroeconomic shocks. Gradient-boosted decision trees---XGBoost \citep{chen2016xgboost} and LightGBM \citep{ke2017lightgbm}---model non-linear tabular interactions effectively, though predicting raw demand levels causes tree leaves to clip when test-set peaks exceed historical training maxima; predicting first differences ($\Delta y_t = y_t - y_{t-1}$) largely mitigates this extrapolation artifact.
+\subsection{Statistical, Linear, Tree-Based, Deep Sequential, and Foundation STLF}
+Classical STLF relies on SARIMAX \citep{box2015time}, exponential smoothing, and regularized linear models \citep{hippert2001neural,almeshaiei2011decomposition,kuster2017electrical}. Gradient-boosted trees---XGBoost \citep{chen2016xgboost} and LightGBM \citep{ke2017lightgbm}---excel on tabular covariates, though raw-level tree leaves cannot extrapolate beyond training maxima unless trained on first differences ($\Delta y_t = y_t - y_{t-1}$).
 
-Recurrent neural networks---LSTM \citep{hochreiter1997lstm}, GRU \citep{cho2014gru}, and bidirectional variants \citep{schuster1997birnn}---became prominent STLF backbones for capturing multi-week temporal dependencies \citep{kong2019stlf,smyl2020hybrid,wang2019combining}. Following \citet{vaswani2017attention}, Transformer architectures such as the Temporal Fusion Transformer \citep{lim2021tft} were applied to energy forecasting \citep{wen2023transformers}, though \citet{zeng2023dlinear} showed that point-wise self-attention can overfit medium-scale series and introduced DLinear. Subsequently, \citet{nie2023patchtst} introduced PatchTST, segmenting lookback windows into overlapping sub-series patches to stabilize attention representations at lower parameter counts.
+Deep forecasting has progressed through recurrent encoders \citep{hochreiter1997lstm,cho2014gru,schuster1997birnn,kong2019stlf,smyl2020hybrid,wang2019combining}, pure MLP/basis-expansion models such as N-BEATS \citep{oreshkin2020nbeats} and N-HiTS \citep{challu2023nhits}, moving-average linear decomposition (DLinear) \citep{zeng2023dlinear}, 2D-variation convolutions (TimesNet) \citep{wu2023timesnet}, and Transformer variants \citep{vaswani2017attention} including TFT \citep{lim2021tft}, PatchTST \citep{nie2023patchtst}, and iTransformer \citep{liu2024itransformer,wen2023transformers}. More recently, zero-shot time-series foundation models such as Chronos \citep{ansari2024chronos} and TimesFM \citep{das2024timesfm} have emerged for univariate/covariate forecasting. In the Bangladesh context, \citet{yeaser2025bangladesh} (co-authored by the corresponding author of the present study) explored bidirectional recurrent and hybrid architectures on national and divisional BPDB demand; here we expand that line of work to a 24-model multi-seed benchmark with strong linear, differenced, patched-Transformer, and conformal uncertainty comparators.
 
-\subsection{Probabilistic Calibration, Thermal/Calendar Engineering, and Regional Context}
-Operational reserve sizing requires calibrated prediction intervals \citep{hong2016probabilistic}. Split Conformal Prediction \citep{lei2018conformal} offers distribution-free coverage under exchangeability, evaluated by Prediction Interval Coverage Probability (PICP), Prediction Interval Normalized Average Width (PINAW), and Winkler score \citep{winkler1972decision}. Under non-stationary seasonal shifts, however, static conformal quantiles degrade, motivating Adaptive Conformal Inference (ACI) \citep{gibbs2021aci}, which adjusts miscoverage thresholds online.
+\subsection{Time-Series Conformal Prediction and Domain Feature Engineering}
+Distribution-free Split Conformal Prediction \citep{lei2018conformal} guarantees finite-sample coverage under exchangeability, scored via PICP, PINAW, and the proper Winkler score \citep{winkler1972decision}. Because real load series violate exchangeability through seasonality and secular drift, dynamic time-series conformal methods have been developed: EnbPI \citep{xu2021enbpi} leverages sequential bootstrap residuals, Adaptive Conformal Inference (ACI) \citep{gibbs2021aci} updates miscoverage levels online, AgACI \citep{zaffran2022agaci} aggregates step sizes online, and weighted non-exchangeable conformal prediction \citep{barber2023nexcp} downweights older calibration scores.
 
-Temperature--load non-linearity is commonly modeled via Cooling and Heating Degree Days (CDD/HDD) \citep{sailor2001cdd,bessec2008nonlin}, though temperate thresholds ($18^\circ\text{C}$/$24^\circ\text{C}$) require climate-specific adaptation in subtropical South Asia. On the calendar axis, \citet{ziel2018calendar} showed that multi-day holiday proximity indicators better capture pre- and post-holiday transitions than single-day binary flags. For Bangladesh, \citet{yeaser2025bangladesh} investigated bidirectional recurrent architectures on national and divisional BPDB demand. Table~\ref{tab:lit_gap} summarizes key methodological differences across representative STLF studies without conflating distinct geographic scopes.
+On the feature side, piecewise Cooling/Heating Degree Days \citep{sailor2001cdd,bessec2008nonlin} and multi-day holiday proximity indicators \citep{ziel2018calendar} are widely used, though temperature thresholds must be detrended and adapted to subtropical climates where winter temperatures remain mild. Table~\ref{tab:lit_gap} situates the methodological scope of this benchmark relative to representative prior studies.
 
 \begin{table*}[t]
 \centering
@@ -104,15 +97,15 @@ Temperature--load non-linearity is commonly modeled via Cooling and Heating Degr
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lllllll}
 \toprule
-\textbf{Study} & \textbf{Geographic / Load Scope} & \textbf{Model Families} & \textbf{Multi-Seed / Tests} & \textbf{Uncertainty} & \textbf{Horizon Scope} & \textbf{Interpretability} \\
+\textbf{Study} & \textbf{Load Scope} & \textbf{Model Families} & \textbf{Statistical Testing} & \textbf{Uncertainty} & \textbf{Horizon Scope} & \textbf{Interpretability} \\
 \midrule
-\citet{kong2019stlf} & Individual residential meters & LSTM & Single run & Point only & Day-ahead & None \\
-\citet{smyl2020hybrid} & M4 heterogeneous benchmarks & ES-RNN hybrid & Competition splits & Quantile PI & Multi-step & Decomposition \\
-\citet{lim2021tft} & Multi-domain energy/retail & TFT & Multi-run & Quantiles & Multi-horizon & Variable selection \\
-\citet{zeng2023dlinear} & Standard ETT/Electricity sets & DLinear vs. Trans. & Multi-run & Point only & Multi-horizon & Linear weights \\
-\citet{nie2023patchtst} & Standard ETT/Electricity sets & PatchTST & Multi-run & Point only & Multi-horizon & Patch attention \\
-\citet{yeaser2025bangladesh} & Bangladesh national \& 8 div. & BiGRU, BiLSTM, Hybrids & Single run & Point only & Day-ahead / rec. & Feature scores \\
-\textbf{This Study} & \textbf{Bangladesh national \& 8 div.} & \textbf{21 models (Stat/Lin/Tree/DL)} & \textbf{5 seeds + HLN-DM (Holm)} & \textbf{Static \& LN-ACI} & \textbf{1--30d + 3-Yr CV} & \textbf{Direct Perm. Imp.} \\
+\citet{kong2019stlf} & Residential meters & LSTM & Point metrics & Point only & Day-ahead & None \\
+\citet{smyl2020hybrid} & M4 benchmarks & ES-RNN & Competition splits & Quantile PI & Multi-step & Decomposition \\
+\citet{lim2021tft} & Multi-domain energy & TFT & Multi-run & Quantiles & Multi-horizon & Variable selection \\
+\citet{zeng2023dlinear} & ETT / Electricity & DLinear vs. Trans. & Multi-run & Point only & Multi-horizon & Linear weights \\
+\citet{nie2023patchtst} & ETT / Electricity & PatchTST & Multi-run & Point only & Multi-horizon & Patch attention \\
+\citet{yeaser2025bangladesh} & Bangladesh nat./div. & BiGRU, BiLSTM, Hybrids & Single-seed & Point only & Day-ahead / rec. & Feature scores \\
+\textbf{This Study} & \textbf{Bangladesh nat./div.} & \textbf{24 models (Lin/Tree/DL)} & \textbf{5 seeds + HLN-DM + MCS} & \textbf{5-way Conformal} & \textbf{1--30d + 3-Yr CV} & \textbf{Merged Perm. Imp.} \\
 \bottomrule
 \end{tabular}%
 }
@@ -125,151 +118,109 @@ Temperature--load non-linearity is commonly modeled via Cooling and Heating Degr
 % =========================================================================
 \section{Methodology}
 
-\subsection{Operational Timing, Target Definition, and Problem Formulation}
-Forecasts are issued daily immediately after BPDB publishes the realized evening peak for day $t-1$ (approximately 22:00\,BST on day $t-1$) to predict the subsequent evening peak $y_t$ occurring around 19:00--21:00\,BST on day $t$---a $\sim$21--23 hour operational day-ahead lead time. At issuance, all historical telemetry over $\mathbf{X}_t = \{\mathbf{x}_{t-14}, \dots, \mathbf{x}_{t-1}\} \in \mathbb{R}^{14 \times C}$ (including day $t-1$ evening peak $y_{t-1}$ and day $t-1$ maximum ambient temperature $T_{t-1}$) is strictly realized:
-\begin{equation}
-    \hat{y}_t = f_\theta(\mathbf{X}_t) \approx y_t.
-\end{equation}
-The target $y_t$ is BPDB's audited \textit{Generation-end Evening Peak Demand (MW)}, defined as actual evening peak generation plus estimated unserved load shedding. Because estimated unserved demand incorporates operator curtailment decisions and reporting noise, $y_t$ is partly policy-influenced rather than purely unconstrained physical consumption, placing an inherent floor on irreducible forecast error. Notably, although BPDB daily logs include a column titled \textit{Minimum Generation Forecast up to 8:00 hrs.}, no public operator forecast exists for evening peak demand, precluding direct comparison against an official utility evening-peak forecast.
+\subsection{Issuance Timing, Target Definition, and Data Quality Audit}
+The forecasting target $y_t$ is BPDB's audited \textit{Generation-end Evening Peak Demand (MW)} on day $t$ (typically occurring between 19:00 and 21:00\,BST), defined as actual evening peak generation plus estimated unserved load shedding \citep{bpdb2025annual}. Because BPDB publishes its daily generation summary online following each evening peak (late night or early morning prior to the next day's evening peak), our benchmark models a next-evening-peak issuance schedule in which $\mathbf{X}_t = \{\mathbf{x}_{t-14}, \dots, \mathbf{x}_{t-1}\} \in \mathbb{R}^{14 \times 117}$ contains strictly realized records through day $t-1$. We note two operational caveats: (i) if BPDB finalizes estimated unserved load shedding slightly after midnight rather than at 22:00\,BST, live issuance shifts to early morning on day $t$ ($\sim$10--12\,h ahead of the evening peak) without altering causal availability of day $t-1$ records; and (ii) because $y_t$ embeds estimated unserved demand, operator curtailment noise introduces an irreducible error floor. BPDB publicly archives only a morning minimum-generation forecast (up to 08:00\,hrs), so no official evening-peak operator forecast is available for direct comparison.
 
-\subsection{Dataset Curation, Quality Audit, and Chronological Splitting}
-Daily generation reports were compiled from BPDB archives \citep{bpdb2025annual} spanning November 21, 2019 through June 30, 2026. A rigorous calendar and physical quality audit reveals two real-world imperfections rarely disclosed in prior studies:
+Auditing the raw BPDB archive (November 21, 2019--June 30, 2026) identifies two data-quality issues:
 \begin{itemize}
-    \item \textbf{Reporting gaps:} The nominal span covers 2,414 calendar days, whereas BPDB published 2,394 daily reports---leaving \textbf{20 missing calendar days} across 14 gaps (longest gap: 6 consecutive days, July 18--23, 2024, coinciding with a nationwide internet disruption; three single-day gaps occur during the 2025--2026 test period). Rather than fabricating missing targets through synthetic interpolation, lags and 14-step windows operate over consecutive available BPDB records, and we explicitly audit post-gap forecast sensitivity in Section~4.
-    \item \textbf{Transmission-loss metering inversions:} Computing daily peak system loss as $\text{Loss}_t = y_t^{\text{gen}} - y_t^{\text{sub}}$ yields 16 records with physically impossible negative values (minimum $-1,189$\,MW, primarily clustered in October--December 2024). We flag and exclude these 16 inverted entries from transmission-loss diagnostics (raising the quality-assured mean peak loss from 504.99\,MW raw to \textbf{510.50\,MW}), while retaining generation-end demand $y_t$ intact.
+    \item \textbf{Reporting gaps:} The 2,414-calendar-day span contains 2,394 published reports---\textbf{20 missing calendar days} across 14 gaps (longest gap: 6 days, July 18--23, 2024; 3 single-day gaps in the 2025--2026 test set). Lags operate over consecutive available BPDB records without target imputation; because only $n=3$ test days follow gaps, post-gap error sensitivity cannot be tested with statistical power.
+    \item \textbf{Metering anomalies:} Daily peak transmission loss ($y_t^{\text{gen}} - y_t^{\text{sub}}$) exhibits 16 negative inversions (clustered mainly in October--December 2024, minimum $-1,189$\,MW) and 3 upper extreme spikes above $Q_3 + 3\times\text{IQR} = 1,168$\,MW (maximum $2,831$\,MW). Direct inspection confirms that divisional demand/supply columns on those October--December 2024 dates remain normal; only the aggregate substation-end column was transiently inverted. Appendix~A reports robust filtered loss statistics (median 510.0\,MW, mean 508.3\,MW, IQR 188.0\,MW).
 \end{itemize}
 
-After dropping 14 initial rolling warm-up rows, 2,380 complete cycles remain (national gross peak range: 6,958--18,355\,MW; zero missing targets). Data are partitioned forward in time into 70\% Training (1,666 rows), 10\% Validation (238 rows), and 20\% Blind Test (476 rows). Independent 14-day windowing inside each split yields \textbf{1,652 training windows}, \textbf{224 validation windows}, and \textbf{462 blind test windows} separated by strict 14-day temporal embargoes. Crucially, to avoid overloading a single validation block for three conflicting roles, we further partition the 224 validation windows chronologically with a 14-day internal embargo into \textbf{\texttt{Val-ES} (105 windows)} for neural early stopping and Ridge hyperparameter tuning, and \textbf{\texttt{Val-Cal} (105 windows)} strictly for SLSQP ensemble weight estimation, validation-first ablation assessment, and initial conformal calibration (Table~\ref{tab:dataset}).
+\subsection{Chronological Splits, Validation Separation, and Detrended Features}
+Dropping 14 warm-up rows leaves 2,380 clean cycles (range 6,958--18,355\,MW), split forward into 70\% Train (1,652 windows), 10\% Validation (224 windows), and 20\% Blind Test (462 windows, March 23, 2025--June 30, 2026) with strict 14-day temporal embargoes. To ensure conformal calibration residuals are untouched by model selection, the 224 validation windows are split chronologically with a 14-day internal embargo into \textbf{\texttt{Val-ES} (105 windows)} for neural early stopping and hyperparameter selection ($\alpha$ / learning rate), and \textbf{\texttt{Val-Cal} (105 windows)} strictly for untouched conformal calibration, validation-first ablation assessment, and (for the SLSQP variant only) simplex weight estimation (Table~\ref{tab:dataset}).
+
+To avoid linear year-number extrapolation into unseen test years, we \textbf{drop the raw \texttt{Year} column} entirely (retaining \texttt{Month} and weekday dummies). Because Dhaka daily maximum temperature never drops below $19.3^\circ\text{C}$ (0.0\% $< 18^\circ\text{C}$), degenerate HDD is omitted. To prevent secular demand growth ($+780.8$\,MW/yr on Train) from confounding the cooling slope, we linearly detrend training-set demand before grid-searching $\tau \in [20^\circ\text{C}, 34^\circ\text{C}]$, yielding \textbf{$\tau^* = 25.0^\circ\text{C}$} (detrended slope $+387.2\,\text{MW}/^\circ\text{C}$, vs. a confounded $+470.9\,\text{MW}/^\circ\text{C}$ without detrending):
+\begin{equation}
+    \text{CDD}_{25,\tau} = \max\!\left(0,\, T_\tau - 25.0^\circ\text{C}\right).
+\end{equation}
+We combine $\text{CDD}_{25}$ with past-only rolling load statistics (3/7/14-day means/SDs, 7-day min/max, $\Delta y_{\tau-1}$), 3-day holiday lead/lag flags (subject to $\pm 1$-day lunar-sighting uncertainty for Eid), and divisional telemetry, yielding $C = 117$ channels scaled to $[0, 1]$ using Train statistics only.
 
 \begin{table*}[t]
 \centering
-\caption{Dataset audit, chronological split structure, 14-day temporal embargoes, and separated validation roles.}
+\caption{Dataset audit, chronological partitions, 14-day temporal embargoes, and separated validation roles.}
 \label{tab:dataset}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lll}
 \toprule
 \textbf{Protocol Component} & \textbf{Specification} & \textbf{Audit / Leakage Control Note} \\
 \midrule
-Source Archive & BPDB Daily Generation Reports & Official national and 8-division operational records \\
-Calendar Span / Records & Nov 21, 2019 -- Jun 30, 2026 (2,414d / 2,394 rows) & 20 missing BPDB reporting days audited (14 gaps; max 6d Jul 2024) \\
-Clean Modeled Cycles & 2,380 rows ($C = 118$ engineered channels) & 14-day rolling warm-up dropped; no target imputation \\
-Training Split (70\%) & 1,652 windows (Dec 5, 2019 -- Jul 7, 2024) & Min--Max scalers and cooling threshold $\tau^*=26.0^\circ\text{C}$ fit here only \\
-Validation: \texttt{Val-ES} & 105 windows (first half of Jul 2024 -- Mar 2025) & Strictly for neural early stopping and Ridge $\alpha$ selection \\
-Validation: \texttt{Val-Cal} & 105 windows (second half, 14d internal embargo) & Strictly for SLSQP fusion, ablation design, and initial conformal quantile \\
-Blind Test Split (20\%) & 462 windows (Mar 23, 2025 -- Jun 30, 2026) & Separated by 14-day embargo; used for final out-of-sample evaluation \\
+Calendar Span / Records & Nov 21, 2019 -- Jun 30, 2026 (2,414d / 2,394 rows) & 20 missing BPDB days audited (14 gaps); raw \texttt{Year} dropped \\
+Clean Modeled Cycles & 2,380 rows ($C = 117$ channels) & Train-only Min--Max scaling; detrended $\tau^* = 25.0^\circ\text{C}$ \\
+Training Split (70\%) & 1,652 windows (Dec 5, 2019 -- Jul 7, 2024) & All scalers, $\tau^*$, weekday offsets, and climatology fit here only \\
+Validation: \texttt{Val-ES} & 105 windows (first half of Jul 2024 -- Mar 2025) & Early stopping, Ridge $\alpha$ grid, and neural LR tuning \\
+Validation: \texttt{Val-Cal} & 105 windows (second half, 14d internal embargo) & Untouched residuals for \texttt{PatchTST-3$\times$} \& \texttt{Ridge} conformal calibration \\
+Blind Test Split (20\%) & 462 windows (Mar 23, 2025 -- Jun 30, 2026) & Single 15-month held-out period separated by 14-day embargo \\
 \bottomrule
 \end{tabular}%
 }
 \end{table*}
 
-\subsection{Subtropical Thermal and Calendar Feature Engineering}
-Inspection of Dhaka daily maximum temperatures ($T_\tau$) across the archive shows a minimum of $19.3^\circ\text{C}$, median $31.0^\circ\text{C}$, 93.3\% of days above $24^\circ\text{C}$, and \textbf{0.0\% of days below $18^\circ\text{C}$}. Importing temperate $18^\circ\text{C}$/$24^\circ\text{C}$ comfort bounds therefore produces an identically zero HDD feature and an almost purely linear CDD proxy. Instead, we drop degenerate HDD entirely and estimate a subtropical piecewise cooling threshold $\tau^*$ strictly on the training set via grid search ($\tau \in [20^\circ\text{C}, 34^\circ\text{C}]$, step $0.5^\circ\text{C}$) minimizing training-set RMSE of $y_\tau = a + b\max(0, T_\tau - \tau)$, yielding \textbf{$\tau^* = 26.0^\circ\text{C}$} (slope $+470.9\,\text{MW}/^\circ\text{C}$; 82.1\% of training days exceed $26^\circ\text{C}$):
-\begin{equation}
-    \text{CDD}_{26,\tau} = \max\!\left(0,\, T_\tau - 26.0^\circ\text{C}\right).
-\end{equation}
-We note openly that BPDB records provide only daily maximum temperature without daily mean/minimum temperature or relative humidity (wet-bulb heat index), limiting thermal precision during humid monsoon episodes.
-
-Short- and medium-term demand inertia is encoded strictly from past actuals using 3-, 7-, and 14-day rolling means and standard deviations, 7-day min/max envelopes, and lag-1 differences ($\Delta y_{\tau-1} = y_{\tau-1} - y_{\tau-2}$). To capture multi-day holiday shifts, we include 3-day lead and lag holiday proximity flags ($\text{Holiday\_lead}_k$, $\text{Holiday\_lag}_k$, $k \in \{1, 2, 3\}$) alongside one-hot weekday and holiday-name indicators, yielding $C = 118$ input channels scaled to $[0, 1]$ using training-split statistics only. We note that lunar Eid lead indicators assume tentative government holiday calendars (subject to $\pm 1$-day moon-sighting confirmation in live deployment).
-
-\subsection{Evaluated Model Families (21 Architectures)}
-We benchmark 21 models spanning six distinct modeling paradigms under one unified codebase:
+\subsection{Equalized 24-Model Suite and Matched Tuning Protocol}
+To ensure an equal playing field across model families, Table~\ref{tab:models_spec} documents every architecture, target formulation (Level $y_t$ vs. First-Difference $\Delta y_t = y_t - y_{t-1}$), and tuning budget. All 24 models fall into six families:
 \begin{enumerate}
-    \item \textbf{Naive and Weekday-Aware Baselines:} Lag-1 Persistence ($\hat{y}_t = y_{t-1}$), Seasonal Naive Lag-7 ($\hat{y}_t = y_{t-7}$), 7-Day Rolling Mean, and \textbf{Weekday-Adjusted Persistence}:
+    \item \textbf{Naive \& Weekday-Aware Baselines:} Lag-1 Persistence, Seasonal Naive (Lag-7), 7-Day Rolling Mean, and \textbf{Weekday-Adjusted Persistence}:
     \begin{equation}
-        \hat{y}_t^{\text{wkday}} = y_{t-1} + \left(\bar{\mu}_{\text{dow}(t)}^{\text{train}} - \bar{\mu}_{\text{dow}(t-1)}^{\text{train}}\right),
+        \hat{y}_t^{\text{wkday}} = y_{t-1} + \bar{\mu}_{\text{dow}(t)}^{\text{train}} - \bar{\mu}_{\text{dow}(t-1)}^{\text{train}}.
     \end{equation}
-    which adds the training-set day-of-week step to yesterday's peak to prevent strawman comparisons on Friday--Saturday transitions.
-    \item \textbf{Statistical and Linear Models:} Causal \textbf{SARIMAX(1,1,1)(1,0,1,7)} \citep{box2015time} with three causal covariates ($\text{CDD}_{26,t-1}$, $\text{Is\_Weekend}_t$, $\text{Holiday}_t$) fitted strictly on Train and Kalman-filtered 1-step ahead; and \textbf{Ridge Regression} fitted directly on the flattened $14 \times 118 = 1,652$-dimensional window with $\alpha \in [0.1, 3000]$ tuned strictly on \texttt{Val-ES} (selecting $\alpha = 10.0$).
-    \item \textbf{Level and Differenced Gradient-Boosted Trees:} Standard \textbf{XGBoost (Level)} \citep{chen2016xgboost}, \textbf{LightGBM} \citep{ke2017lightgbm}, and \textbf{XGBoost-Diff ($\Delta y$)}, which predicts the daily change $\widehat{\Delta y}_t = y_t - y_{t-1}$ and reconstructs $\hat{y}_t = y_{t-1} + \widehat{\Delta y}_t$, directly testing whether tree extrapolation failure is an artifact of level-space targeting.
-    \item \textbf{Linear Decomposition and Patched Transformers:} \textbf{DLinear} \citep{zeng2023dlinear} (3,306 params), single \textbf{PatchTST} \citep{nie2023patchtst} (6 overlapping patches of length 4, stride 2, 2 Pre-Norm Transformer layers, 122,305 params), and a like-for-like \textbf{PatchTST-Ensemble (3$\times$)} averaging three independently seeded PatchTST models per outer run (366,915 params) to match the 3-network budget of our recurrent ensembles.
-    \item \textbf{Recurrent, Attention, and Hybrid Networks:} \textbf{BiGRU} ($64 \times 2$ units, 300,289 params), \textbf{BiLSTM} ($64 \times 2$ units, 323,841 params), \textbf{BiLSTM-Attention} ($96 \times 2$ units with scaled dot-product temporal self-attention, 168,787 params), vanilla \textbf{Transformer} (189,505 params), \textbf{CNN-BiGRU-Transformer} (42,913 params), and two residual hybrids (\textbf{Hybrid BiGRU-XGBoost} and \textbf{Hybrid BiLSTM-Attn-XGBoost}).
-    \item \textbf{Recurrent Ensembles (Equal-Weight vs. Val-Cal SLSQP):} Comparing simple \textbf{Equal-Weight RNN Ens} ($w_1=w_2=w_3=1/3$) against \textbf{Val-Opt RNN Ensemble} (Fig.~\ref{fig:arch}, Table~\ref{tab:arch_layers}), whose convex weights $\mathbf{w}^* \in \Delta^2$ minimize L1 loss strictly on \texttt{Val-Cal}:
-    \begin{align}
-        \mathbf{w}^* &= \arg\min_{\mathbf{w} \in \Delta^2} \frac{1}{N_{\text{cal}}}
-        \sum_{i=1}^{N_{\text{cal}}} \Big| y_i^{\text{cal}} - \textstyle\sum_{j=1}^{3} w_j \hat{y}_{i,j}^{\text{cal}} \Big|, \\
-        \hat{y}_{\text{ens}} &= w_1^*\,\hat{y}_{\text{BiGRU}} + w_2^*\,\hat{y}_{\text{BiLSTM-Attn}} \nonumber \\
-        &\quad + w_3^*\,\hat{y}_{\text{BiLSTM}}.
-    \end{align}
+    \item \textbf{Statistical \& Linear Models:} Causal \textbf{SARIMAX(1,1,1)(1,0,1,7)} (fixed weekly seasonal order, 3 causal covariates: $\text{CDD}_{25,t-1}$, $\text{Is\_Weekend}_t$, $\text{Holiday}_t$); \textbf{Ridge ($14 \times 117$)} and \textbf{Ridge-Diff ($\Delta y$)}, both with L2 penalty $\alpha \in \{0.1, 1, 10, 50, 100, 300, 1000, 3000\}$ selected strictly on \texttt{Val-ES} ($\alpha = 10$ for both).
+    \item \textbf{Level \& Differenced GBDTs:} \textbf{XGBoost (Level)}, \textbf{XGBoost-Diff ($\Delta y$)} (default depth 6, lr 0.3, L1 eval, patience 8 on \texttt{Val-ES}), and \textbf{LightGBM} (L1 objective, 500 max trees, lr 0.05, 31 leaves, patience 8).
+    \item \textbf{Standard CI-DLinear, MLP, and Patched Transformers:} \textbf{Standard Channel-Independent DLinear} \citep{zeng2023dlinear} applied strictly to the 14-day univariate target series (kernel 5, 30 parameters); a \textbf{2-Layer MLP} ($1638 \to 128 \to 64 \to 1$, dropout 0.20, 218,113 parameters); \textbf{PatchTST (Single)} using \textit{channel-mixing} overlapping patches ($P=4, S=2$, 6 patches, $d_{\text{model}}=64$, 2 Pre-Norm layers, 4 heads, FFN 128, dropout 0.20, \textit{without} RevIN; 122,049 parameters); like-for-like 3-member \textbf{PatchTST-Ensemble (3$\times$)} (366,147 parameters); and \textbf{PatchTST-Diff ($\Delta y$, 3$\times$)} predicting standardized daily differences $\Delta y_t$.
+    \item \textbf{Recurrent, Attention \& Hybrid Networks:} \textbf{BiGRU} ($64 \times 2$), \textbf{BiLSTM} ($64 \times 2$), \textbf{BiLSTM-Attention} ($96 \times 2$, scaled dot-product temporal self-attention), vanilla \textbf{Transformer} ($d=64$, 2 layers, 4 heads), \textbf{CNN-BiGRU-Transformer} (Conv1d 32 + BiGRU $32\times 2$ + 2-head MHA), and two residual deep--XGBoost hybrids.
+    \item \textbf{Recurrent Ensembles:} \textbf{Equal-Weight RNN Ens} ($1/3$ each of BiGRU, BiLSTM-Attn, BiLSTM; 791,253 parameters) and \textbf{Val-Opt RNN Ensemble} (SLSQP convex weights fit on \texttt{Val-Cal}).
 \end{enumerate}
-
-All neural networks share one training schedule (AdamW $\text{lr}=2.5\times10^{-3}$, weight decay $10^{-5}$, L1 loss, batch size 32, max 55 epochs, patience 8 on \texttt{Val-ES}, ReduceLROnPlateau, gradient clip 1.0, Table~\ref{tab:protocol}) across five seeds (42, 123, 7, 2024, 999). We acknowledge that using one shared learning rate and schedule across diverse architectures is a controlled benchmark simplification rather than per-architecture hyperparameter optimization.
+For every neural family, learning rate is selected strictly on \texttt{Val-ES} (Seed 42) from $\{10^{-3}, 2.5\times10^{-3}\}$ ($\{5\times10^{-3}, 10^{-2}\}$ for 30-parameter DLinear) using AdamW (weight decay $10^{-5}$, L1 loss, batch 32, max 55 epochs, patience 8, ReduceLROnPlateau, clip 1.0) and then held fixed across all five seeds (42, 123, 7, 2024, 999). Fig.~\ref{fig:arch} illustrates the leading-group and conformal pipeline.
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.92\textwidth]{fig_architecture.pdf}
-    \caption{Overview of the multi-branch forecasting, Val-ES/Val-Cal separation, Locally Normalized ACI uncertainty, and downstream grid analytics pipeline.}
+    \caption{Overview of the tied leading group (\texttt{PatchTST-3$\times$}, \texttt{Ridge}, and \texttt{Equal-Weight RNN}), separated \texttt{Val-ES}/\texttt{Val-Cal} protocol, 5-way conformal uncertainty wrapper, and downstream evaluation suite.}
     \label{fig:arch}
 \end{figure*}
 
 \begin{table*}[t]
 \centering
-\caption{Layer specification and parameter counts of the 3-branch RNN ensemble (792,917 total parameters) alongside equal-budget PatchTST-Ensemble (3$\times$, 366,915 parameters).}
-\label{tab:arch_layers}
+\caption{Architecture specifications, target spaces, and matched \texttt{Val-ES} tuning budgets across all evaluated model families.}
+\label{tab:models_spec}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{llcc}
+\begin{tabular}{llllc}
 \toprule
-\textbf{Branch / Model} & \textbf{Layer Specification} & \textbf{Output Shape} & \textbf{Parameters} \\
+\textbf{Model Family} & \textbf{Target} & \textbf{Key Architecture / Hyperparameters} & \textbf{\texttt{Val-ES} Tuning} & \textbf{Params (fp32)} \\
 \midrule
-Input Window & Past-only multivariate window (train-only Min--Max) & $(14, 118)$ & 0 \\
-\midrule
-Branch 1: BiGRU & BiGRU($64 \times 2$) $\to$ Flatten $\to$ Linear($1792 \to 128$) + ReLU + Drop(0.20) $\to$ Linear(1) & $(1,)$ & 300,289 \\
-Branch 2: BiLSTM-Attn & BiLSTM($96 \times 2$) $\to$ Scaled Dot-Product Self-Attn $\to$ Drop(0.20) $\to$ Linear(1) & $(1,)$ & 168,787 \\
-Branch 3: BiLSTM & BiLSTM($64 \times 2$) $\to$ Flatten $\to$ Linear($1792 \to 128$) + ReLU + Drop(0.20) $\to$ Linear(1) & $(1,)$ & 323,841 \\
-\midrule
-\textbf{RNN Ensemble (3$\times$)} & Equal-Weight ($1/3$ each) or Val-Cal SLSQP Fusion & $(1,)$ & \textbf{792,917} \\
-\textbf{PatchTST-Ensemble (3$\times$)} & $3 \times$ [Patch($P=4, S=2$) $\to$ 2 Pre-Norm Transformer Layers ($d=64, 4$ heads)] & $(1,)$ & \textbf{366,915} \\
+SARIMAX & Level & Fixed order $(1,1,1)(1,0,1,7)$; 3 causal covariates & MLE on Train & 8 (0.03\,KiB) \\
+Ridge / Ridge-Diff & Level / $\Delta y$ & L2 linear on flattened $14 \times 117$ window & $\alpha \in [0.1, 3000] \to 10$ & 1,639 (6.40\,KiB) \\
+XGBoost / XGB-Diff & Level / $\Delta y$ & Depth 6, lr 0.3, L1 eval, early stop pat. 8 & Early stop on \texttt{Val-ES} & Tree ensemble \\
+LightGBM & Level & L1 loss, 31 leaves, lr 0.05, max 500 trees & Early stop on \texttt{Val-ES} & Tree ensemble \\
+DLinear (CI) & Level & Channel-independent target decomposition (kernel 5) & lr $\in \{5\text{e-}3, 1\text{e-}2\} \to 5\text{e-}3$ & 30 (0.12\,KiB) \\
+MLP ($14 \times 117$) & Level & $1638 \to 128 \to 64 \to 1$, ReLU, Drop 0.20 & lr $\in \{1\text{e-}3, 2.5\text{e-}3\} \to 1\text{e-}3$ & 218,113 (852.0\,KiB) \\
+PatchTST (1$\times$ / 3$\times$) & Level / $\Delta y$ & Channel-mixing, no RevIN, $P=4, S=2$, 2 Pre-Norm layers & lr $\in \{1\text{e-}3, 2.5\text{e-}3\} \to 1\text{e-}3$ & 122k / 366k (1.40\,MiB) \\
+BiGRU / BiLSTM / Attn & Level & $64\times2$ / $64\times2$ / $96\times2$ + temporal self-attn & lr $\to 2.5\text{e-}3$ / $1\text{e-}3$ / $2.5\text{e-}3$ & 168k--323k \\
+RNN Ensemble (3$\times$) & Level & Equal-Weight ($1/3$ each) or \texttt{Val-Cal} SLSQP & Member LRs above & 791,253 (3.02\,MiB) \\
+Transformer / CNN-T & Level & 2-layer MHA ($d=64$) / Conv1d(32)+BiGRU(32)+MHA & lr $\in \{1\text{e-}3, 2.5\text{e-}3\} \to 2.5\text{e-}3$ & 189k / 43k \\
 \bottomrule
 \end{tabular}%
 }
 \end{table*}
 
-\begin{table}[t]
-\centering
-\caption{Shared neural training protocol applied across models and random seeds.}
-\label{tab:protocol}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{ll}
-\toprule
-\textbf{Hyperparameter} & \textbf{Shared Setting} \\
-\midrule
-Max Epochs / Early Stopping & 55 epochs / patience 8 (on \texttt{Val-ES} MAE) \\
-Optimizer / Scheduler & AdamW ($\text{lr}=2.5\times10^{-3}$, $\text{wd}=10^{-5}$) / Plateau (0.5, pat. 4) \\
-Loss / Batch / Clip & L1 Loss (MAE) / 32 / Max $\ell_2$ norm 1.0 \\
-Random Seeds & National: 5 seeds (42, 123, 7, 2024, 999); Div./CV: 3 seeds (42, 123, 7) \\
-\bottomrule
-\end{tabular}%
-}
-\end{table}
+\subsection{Evaluation Metrics, HLN-DM, Model Confidence Set, and 5-Way Conformal Ablation}
+Point forecasts are evaluated on co-primary \textbf{MAE (MW)} and \textbf{RMSE (MW)}, supplemented by \textbf{MAPE (\%)}, $R^2$, and the \textbf{Skill Score vs. Weekday-Adjusted Persistence}:
+\begin{equation}
+    \text{SS}_{\text{wkday}} = \left(1 - \frac{\text{MAE}_{\text{model}}}{\text{MAE}_{\text{wkday-persist}}}\right) \times 100\%.
+\end{equation}
+We omit the redundant metric $100\% - \text{MAPE}$. For significance testing, we set \texttt{PatchTST-Ensemble (3$\times$)} as the reference in Harvey--Leybourne--Newbold (HLN) adjusted Diebold--Mariano tests \citep{diebold1995dm,harvey1997testing} ($L_{\text{HAC}}=14$, Holm--Bonferroni adjusted $p_{\text{Holm}}$ \citep{holm1979simple}) on \textbf{both matched single-run (Seed 42) and 5-seed ensemble averages}. To avoid arbitrary single-model crowning, we compute the \textbf{95\% Hansen Model Confidence Set (MCS)} \citep{hansen2011mcs} via moving-block bootstrap ($T_{\max}$ statistic, block length 7, 1,000 resamples) separately for MAE and RMSE across the top 12 models.
 
-\subsection{Static Split Conformal vs. Locally Normalized Adaptive Conformal Inference (LN-ACI)}
-We compare two distribution-free uncertainty wrappers initialized strictly on the 105-day \texttt{Val-Cal} split at nominal miscoverage $\alpha \in \{0.20, 0.10\}$ (80\% and 90\% intervals):
+To address seasonal non-stationarity without a strawman conformal baseline, we evaluate a \textbf{5-way conformal ablation} on the \textit{untouched} 105-day \texttt{Val-Cal} residuals of both \texttt{PatchTST-3$\times$} and \texttt{Ridge} at 80\% and 90\% nominal levels:
 \begin{enumerate}
-    \item \textbf{Static Split Conformal \citep{lei2018conformal}:} Computes a fixed half-width $\hat{q}_{1-\alpha} = \text{Quantile}(\{|y_i^{\text{cal}} - \hat{y}_i^{\text{cal}}|\}, p_\alpha)$ where $p_\alpha = \lceil (N_{\text{cal}}+1)(1-\alpha)\rceil / N_{\text{cal}}$, yielding constant-width bands $[\hat{y}_t - \hat{q}_{1-\alpha},\; \hat{y}_t + \hat{q}_{1-\alpha}]$.
-    \item \textbf{Locally Normalized Adaptive Conformal Inference (LN-ACI) \citep{gibbs2021aci}:} Addresses both seasonal heteroscedasticity (high summer volatility vs. quiet winters) and secular drift strictly causally. At day $t$, we compute a causal local scale $\hat{\sigma}_t = \max(\sigma_{\min}, \frac{1}{14}\sum_{k=1}^{14} |y_{t-k} - \hat{y}_{t-k}|)$, form normalized nonconformity scores $s_\tau = |y_\tau - \hat{y}_\tau|/\hat{\sigma}_\tau$ over a trailing 90-day window, and update the effective miscoverage level online after day $t$ realizes:
+    \item \textbf{Static Split Conformal} \citep{lei2018conformal}: fixed \texttt{Val-Cal} quantile.
+    \item \textbf{Rolling-Window Conformal (120d)}: unweighted sliding empirical quantile over the trailing 120 realized residuals.
+    \item \textbf{Locally Normalized Static}: causal 14-day rolling scale $\hat{\sigma}_t = \max(\sigma_{\min}, \frac{1}{14}\sum_{k=1}^{14}|r_{t-k}|)$ paired with a \textit{fixed} normalized \texttt{Val-Cal} quantile (isolating local scale adaptation).
+    \item \textbf{Plain ACI} \citep{gibbs2021aci}: online miscoverage update $\alpha_{t+1} = \text{clip}(\alpha_t + \gamma(\alpha - \text{err}_t),\, 0.02,\, 0.50)$ ($\gamma=0.05$) over 120 raw residuals without local scaling (isolating online feedback while ensuring at least 2.4 tail samples in the 120-score window).
+    \item \textbf{Locally Normalized ACI (LN-ACI)}: combines the 14-day causal local scale $\hat{\sigma}_t$ with the online $\alpha_t \in [0.02, 0.50]$ update over 120 normalized scores:
     \begin{align}
-        [L_t, U_t] &= \left[\hat{y}_t - h_t,\; \hat{y}_t + h_t\right], \quad h_t = \hat{q}_{1-\alpha_t}^{\text{norm}}\hat{\sigma}_t, \\
-        \alpha_{t+1} &= \text{clip}\!\Big(\alpha_t + \gamma(\alpha - \text{err}_t),\, 0.005,\, 0.50\Big),
+        [L_t, U_t] &= \left[\hat{y}_t - h_t,\; \hat{y}_t + h_t\right], \\
+        h_t &= \hat{q}_{1-\alpha_t}^{\text{norm}}\hat{\sigma}_t, \\
+        \alpha_{t+1} &= \text{clip}\!\Big(\alpha_t + \gamma(\alpha - \text{err}_t),\, 0.02,\, 0.50\Big).
     \end{align}
-    where $\text{err}_t = \mathbb{I}\{y_t \notin [L_t, U_t]\}$ and step size $\gamma = 0.05$. Intervals are evaluated via PICP, PINAW, and the proper Winkler score \citep{winkler1972decision}:
-    \begin{align}
-        W_\alpha(L_t, U_t, y_t) &= (U_t - L_t) + \frac{2}{\alpha}\max(0, L_t - y_t) \nonumber \\
-        &\quad + \frac{2}{\alpha}\max(0, y_t - U_t).
-    \end{align}
-\end{enumerate}
-
-\subsection{Evaluation Metrics, HLN-DM Significance, and Direct Model Explainability}
-All forecasts are inverse-transformed to MW and evaluated via MAE, RMSE, MAPE, $R^2$, and percentage accuracy ($100\% - \text{MAPE}$, well-defined since demand always exceeds 6,958\,MW). Scale-faithful MAE (MW) and RMSE (MW) are our primary decision criteria.
-
-To test error differentials $d_t = |e_{A,t}| - |e_{B,t}|$ under serial error correlation, we compute the \textbf{Harvey--Leybourne--Newbold (HLN)} finite-sample adjusted Diebold--Mariano statistic \citep{diebold1995dm,harvey1997testing} with Newey--West HAC variance ($L_{\text{HAC}} = 14$) alongside 95\% moving-block bootstrap CIs (block length 7, 1,000 resamples) and \textbf{Holm--Bonferroni} step-down adjusted $p$-values ($p_{\text{Holm}}$) \citep{holm1979simple} controlling family-wise error across all 20 pairwise comparisons.
-
-To explain the \textit{actual deployed PyTorch ensemble} rather than relying on a weaker tree-based TreeSHAP surrogate \citep{lundberg2017shap}, we perform \textbf{Direct Group Permutation Importance}: grouping the 118 features into six semantically coherent operational blocks (Divisional Telemetry, Lagged National Peak/Rolling Stats, Day-of-Week/Seasonality, Holiday/Eid Flags, Temperature/$\text{CDD}_{26}$, and Generation Constraints) and simultaneously permuting each block across all 14 lookback steps over 15 Monte Carlo repeats to measure exact $\Delta\text{MAE}$ (MW).
-
-\subsection{Rolling CV, Unconfounded Learning Curve, Same-Split Divisional, and Causal Multi-Horizon Designs}
-\begin{enumerate}
-    \item \textbf{3-Fold Expanding-Window Rolling-Origin CV:} Evaluates Fold~1 (Test: 2023, $N_{\text{train}}=922$), Fold~2 (Test: 2024, $N_{\text{train}}=1,282$), and Fold~3 (Test: 2025--2026, $N_{\text{train}}=1,652$) with independent train-only scalers and \texttt{Val-ES}/\texttt{Val-Cal} splits inside each fold (3 seeds in Folds 1--2; 5 seeds in Fold~3).
-    \item \textbf{Unconfounded Fixed-Test Learning Curve:} Because Fold~1 (2023) differs in both training length and post-2022 macroeconomic crisis regime, we hold the 2025--2026 blind test set ($n=462$) strictly fixed and vary \textit{only} the trailing training window length ($1.5, 2.5, 3.5, 4.5$ years) for SARIMAX, Ridge, PatchTST-Ensemble (3$\times$), and Val-Opt RNN Ensemble.
-    \item \textbf{Same-Split 8-Division Benchmark:} Rather than comparing across incompatible historical periods against published literature numbers, we evaluate all eight administrative divisions on the exact same 462-day split comparing Lag-1 Persistence, Lag-7 Naive, Ridge, a same-split 3-seed Single BiGRU (replicating the recurrent backbone of \citet{yeaser2025bangladesh}), and the 3-seed Val-Opt RNN Ensemble.
-    \item \textbf{Causal Direct Multi-Horizon ($h = 1, 3, 7, 14, 30$ days):} Trains separate direct models from forecast-origin features $\mathbf{X}_{t-14:t-1}$ (zero future telemetry) and benchmarks them against Origin Persistence, Direct Ridge, and a strong \textbf{Climatology + Linear Trend} baseline (3 Fourier annual harmonics + linear trend + weekday dummies fitted strictly on Train).
 \end{enumerate}
 
 \FloatBarrier
@@ -279,46 +230,110 @@ To explain the \textit{actual deployed PyTorch ensemble} rather than relying on 
 % =========================================================================
 \section{Experiments and Results}
 
-\subsection{21-Model, 5-Seed National Blind-Test Benchmark}
-Table~\ref{tab:main_results} reports blind-test performance across all 21 architectures over five random seeds (42, 123, 7, 2024, 999), and Fig.~\ref{fig:forecast_comp} plots forecasts over the 462-day test window. Four critical findings emerge that correct common STLF assumptions:
+\subsection{24-Model, 5-Seed Benchmark and 95\% Model Confidence Set}
+Table~\ref{tab:main_results} reports blind-test performance across all 24 models over five seeds (Fig.~\ref{fig:forecast_comp}, Fig.~\ref{fig:conv}), Table~\ref{tab:mcs} reports the formal 95\% Hansen MCS, and Table~\ref{tab:dm_results} (Fig.~\ref{fig:dm_forest}) reports HLN-DM tests referenced to \texttt{PatchTST-Ensemble (3$\times$)}. Five key findings emerge:
 
 \begin{enumerate}
-    \item \textbf{PatchTST-Ensemble (3$\times$) leads on the 2025--2026 blind test:} Averaging three independently seeded PatchTST models achieves the lowest overall MAE (\textbf{574.53 $\pm$ 6.68\,MW}, 4.37\% MAPE, 95.63\% accuracy, $R^2 = 0.822$) while cutting single-PatchTST cross-seed standard deviation by 2.3$\times$ (from 15.37 to 6.68\,MW) using 366,915 parameters---less than half the parameter budget of the 3-branch RNN ensemble (792,917 parameters).
-    \item \textbf{Ridge regression is a formidable linear benchmark:} Fitted on the identical $14 \times 118$ engineered matrix ($\alpha=10.0$ selected on \texttt{Val-ES}), Ridge achieves \textbf{599.09\,MW MAE} ($R^2 = 0.820$) at 0.04\,ms CPU latency, outperforming SARIMAX by $-51.7$\,MW and outperforming every standalone recurrent network as well as both recurrent ensembles on the primary split.
-    \item \textbf{Equal-weight averaging outperforms SLSQP weight optimization under strict \texttt{Val-Cal} separation:} Once calibration is isolated to the 105-day \texttt{Val-Cal} block, unconstrained SLSQP weights vary substantially across seeds (BiGRU: 0.00--0.14; BiLSTM-Attn: 0.00--0.86; BiLSTM: 0.00--0.96; mean $[0.037, 0.416, 0.547]$), degrading blind-test MAE relative to simple Equal-Weight RNN averaging (\textbf{607.08 $\pm$ 8.21\,MW} vs. 619.91 $\pm$ 17.60\,MW) and inflating cross-seed SD more than two-fold. Simple uniform averaging is both more accurate and more stable than finite-sample simplex optimization.
-    \item \textbf{Differencing rescues tree models, and weekday adjustment strengthens persistence:} Predicting daily load differences ($\Delta y$) cuts XGBoost MAE by \textbf{$-$183.2\,MW} (from 825.17 to 641.99\,MW), confirming that raw-level tree collapse was primarily an extrapolation artifact. Similarly, Weekday-Adjusted Persistence improves over raw Lag-1 Persistence by \textbf{$-$122.3\,MW} (633.43 vs. 755.72\,MW), setting a far more realistic naive floor than Lag-1 or Seasonal Lag-7 (1,243.25\,MW).
+    \item \textbf{A Statistically Tied Leading Group:} On the 2025--2026 blind test set, \texttt{PatchTST-3$\times$} achieves the lowest point MAE ($584.20 \pm 10.71$\,MW, $+7.8\%$ skill vs. Weekday-Adjusted Persistence) and lowest RMSE ($841.60 \pm 7.78$\,MW), closely followed by \texttt{PatchTST-Diff} ($589.61 \pm 6.23$\,MW MAE), \texttt{PatchTST (Single)} ($597.72$\,MW), \texttt{Val-Opt RNN Ensemble} ($599.62$\,MW, $846.25$\,MW RMSE), \texttt{Ridge} ($602.29$\,MW, $862.98$\,MW RMSE, $+4.9\%$ skill), \texttt{Equal-Weight RNN Ens} ($603.23 \pm 6.66$\,MW, $845.23$\,MW RMSE), and \texttt{Ridge-Diff} ($607.07$\,MW). Crucially, \textbf{all seven models belong to the 95\% Hansen MCS on both MAE and RMSE} ($p_{\text{MCS}} \ge 0.29$, Table~\ref{tab:mcs}), and HLN-DM differences between \texttt{PatchTST-3$\times$} and \texttt{Ridge} ($p_{\text{Holm}} = 0.407$ Seed 42; $1.000$ 5-seed) or \texttt{Equal-Weight RNN} ($p_{\text{Holm}} = 0.407$ / $1.000$) are not statistically significant.
+    \item \textbf{Modest Real-World Skill Over Weekday-Adjusted Persistence:} Weekday-Adjusted Persistence ($633.43$\,MW) already outperforms single BiGRU ($656.35$\,MW), SARIMAX ($650.47$\,MW), XGBoost-Diff ($642.90$\,MW), and both MLP and CI-DLinear. The practical MAE skill gain over weekday persistence is $+7.8\%$ for \texttt{PatchTST-3$\times$}, $+4.9\%$ for \texttt{Ridge}, and $+4.8\%$ for \texttt{Equal-Weight RNN} (with \texttt{PatchTST-3$\times$} beating Weekday-Adjusted Persistence on Seed 42 at $p_{\text{Holm}} = 0.018$ and borderline on 5-seed average at $p_{\text{Holm}} = 0.053$).
+    \item \textbf{Equal-Weight vs. SLSQP RNN Fusion:} Equal-Weight RNN ($603.23 \pm 6.66$\,MW, $845.23$\,MW RMSE) achieves half the cross-seed MAE SD of \texttt{Val-Cal} SLSQP ($599.62 \pm 13.50$\,MW, $846.25$\,MW RMSE) while avoiding unstable per-seed weights (BiGRU $0.02$--$0.65$; BiLSTM-Attn $0.10$--$0.46$; BiLSTM $0.00$--$0.69$).
+    \item \textbf{Standard CI-DLinear, MLP, and Differencing ($\Delta y$):} Standard univariate \texttt{DLinear (CI)} (30 parameters) converges cleanly to $698.29 \pm 2.74$\,MW, confirming that univariate decomposition lags multivariate models by $\sim$100\,MW due to missing weather/calendar covariates. A 2-layer \texttt{MLP} overfits the 1,638-dim flattened window ($719.51 \pm 71.21$\,MW) relative to L2-regularized \texttt{Ridge} ($602.29$\,MW). First-differencing ($\Delta y$) cuts XGBoost MAE by \textbf{21.5\% overall} ($819.35 \to 642.90$\,MW) and by \textbf{44.2\% on $>15$\,GW peaks} ($1,084.8 \to 605.8$\,MW), while giving \texttt{PatchTST-Diff} tighter cross-seed MAE SD ($6.23$\,MW) at higher RMSE ($890.85$\,MW) and keeping \texttt{Ridge-Diff} near level \texttt{Ridge} ($607.07$ vs. $602.29$\,MW).
+    \item \textbf{Matched Single-Run vs. 5-Seed Ensemble Averaging:} On matched Seed-42 runs (Table~\ref{tab:dm_results}), \texttt{PatchTST-3$\times$} ($577.37$\,MW) significantly beats 14 of 23 comparators ($p_{\text{Holm}} \le 0.018$), including single \texttt{PatchTST} ($p_{\text{Holm}} = 0.006$), confirming that 3-member ensembling provides a statistically significant stability gain.
 \end{enumerate}
 
 \begin{table*}[t]
 \centering
-\caption{National evening peak demand benchmark across 21 architectures on the 462-day blind test set (Mar 2025--Jun 2026), reported as mean $\pm$ sample standard deviation (SD) across 5 random seeds (42, 123, 7, 2024, 999). Best per column in \textbf{bold}.}
+\caption{National evening peak demand benchmark across 24 models on the 462-day blind test set (Mar 2025--Jun 2026), reported as mean $\pm$ SD across 5 seeds. $\text{SS}_{\text{wkday}}$ denotes MAE skill score relative to Weekday-Adjusted Persistence (633.43\,MW). Best per column in \textbf{bold}.}
 \label{tab:main_results}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
-\textbf{Model Architecture} & \textbf{MAE (MW)} & \textbf{RMSE (MW)} & \textbf{MAPE (\%)} & \textbf{Accuracy (\%)} & \textbf{$R^2$} \\
+\textbf{Model Architecture} & \textbf{MAE (MW)} & \textbf{RMSE (MW)} & \textbf{MAPE (\%)} & \textbf{$\text{SS}_{\text{wkday}}$ (\%)} & \textbf{$R^2$} \\
 \midrule
-Seasonal Naive (Lag-7) & 1243.25 $\pm$ 0.00 & 1780.74 $\pm$ 0.00 & 9.26 $\pm$ 0.00 & 90.74 $\pm$ 0.00 & 0.24 $\pm$ 0.00 \\
-7-Day Rolling Mean & 928.50 $\pm$ 0.00 & 1256.99 $\pm$ 0.00 & 7.02 $\pm$ 0.00 & 92.98 $\pm$ 0.00 & 0.62 $\pm$ 0.00 \\
-DLinear & 881.18 $\pm$ 172.03 & 1196.52 $\pm$ 203.75 & 6.46 $\pm$ 1.18 & 93.54 $\pm$ 1.18 & 0.65 $\pm$ 0.13 \\
-XGBoost (Level) & 825.17 $\pm$ 0.00 & 1126.84 $\pm$ 0.00 & 5.93 $\pm$ 0.00 & 94.07 $\pm$ 0.00 & 0.69 $\pm$ 0.00 \\
-Persistence (Lag-1) & 755.72 $\pm$ 0.00 & 1056.69 $\pm$ 0.00 & 5.71 $\pm$ 0.00 & 94.29 $\pm$ 0.00 & 0.73 $\pm$ 0.00 \\
-Custom Transformer & 702.12 $\pm$ 42.52 & 934.83 $\pm$ 39.28 & 5.19 $\pm$ 0.28 & 94.81 $\pm$ 0.28 & 0.79 $\pm$ 0.02 \\
-LightGBM & 697.29 $\pm$ 0.00 & 960.69 $\pm$ 0.00 & 5.11 $\pm$ 0.00 & 94.89 $\pm$ 0.00 & 0.78 $\pm$ 0.00 \\
-CNN-BiGRU-Transformer & 680.20 $\pm$ 63.67 & 918.40 $\pm$ 50.41 & 5.05 $\pm$ 0.34 & 94.95 $\pm$ 0.34 & 0.80 $\pm$ 0.02 \\
-SARIMAX(1,1,1)(1,0,1,7) & 650.78 $\pm$ 0.00 & 907.34 $\pm$ 0.00 & 4.87 $\pm$ 0.00 & 95.13 $\pm$ 0.00 & 0.80 $\pm$ 0.00 \\
-XGBoost-Diff ($\Delta y$) & 641.99 $\pm$ 0.00 & 930.02 $\pm$ 0.00 & 4.75 $\pm$ 0.00 & 95.25 $\pm$ 0.00 & 0.79 $\pm$ 0.00 \\
-Hybrid BiLSTM-Attn-XGB & 640.57 $\pm$ 33.02 & 896.88 $\pm$ 40.38 & 4.76 $\pm$ 0.23 & 95.24 $\pm$ 0.23 & 0.81 $\pm$ 0.02 \\
-Hybrid BiGRU-XGBoost & 637.14 $\pm$ 11.62 & 882.82 $\pm$ 13.67 & 4.70 $\pm$ 0.08 & 95.30 $\pm$ 0.08 & 0.81 $\pm$ 0.01 \\
-Weekday-Adj. Persistence & 633.43 $\pm$ 0.00 & 932.57 $\pm$ 0.00 & 4.76 $\pm$ 0.00 & 95.24 $\pm$ 0.00 & 0.79 $\pm$ 0.00 \\
-BiGRU & 633.38 $\pm$ 15.41 & 879.64 $\pm$ 12.46 & 4.72 $\pm$ 0.12 & 95.28 $\pm$ 0.12 & 0.81 $\pm$ 0.01 \\
-BiLSTM-Attention & 632.03 $\pm$ 31.90 & 896.16 $\pm$ 39.47 & 4.73 $\pm$ 0.23 & 95.27 $\pm$ 0.23 & 0.81 $\pm$ 0.02 \\
-BiLSTM & 625.19 $\pm$ 12.74 & 882.31 $\pm$ 18.61 & 4.65 $\pm$ 0.08 & 95.35 $\pm$ 0.08 & 0.81 $\pm$ 0.01 \\
-Val-Opt RNN Ensemble & 619.91 $\pm$ 17.60 & 880.73 $\pm$ 21.17 & 4.63 $\pm$ 0.12 & 95.37 $\pm$ 0.12 & 0.81 $\pm$ 0.01 \\
-Equal-Weight RNN Ensemble & 607.08 $\pm$ 8.21 & 858.86 $\pm$ \textbf{8.37} & 4.53 $\pm$ \textbf{0.06} & 95.47 $\pm$ \textbf{0.06} & 0.82 $\pm$ \textbf{0.00} \\
-Ridge Regression ($14 \times 118$) & 599.09 $\pm$ 0.00 & 863.29 $\pm$ 0.00 & 4.49 $\pm$ 0.00 & 95.51 $\pm$ 0.00 & 0.82 $\pm$ 0.00 \\
-PatchTST (Single) & 576.61 $\pm$ 15.37 & \textbf{855.54} $\pm$ 23.50 & 4.37 $\pm$ 0.13 & 95.63 $\pm$ 0.13 & \textbf{0.82} $\pm$ 0.01 \\
-\textbf{PatchTST-Ensemble (3$\times$)} & \textbf{574.53 $\pm$ 6.68} & 859.36 $\pm$ 13.92 & \textbf{4.37 $\pm$ 0.06} & \textbf{95.63 $\pm$ 0.06} & \textbf{0.82} $\pm$ 0.01 \\
+Seasonal Naive (Lag-7) & 1243.25 $\pm$ 0.00 & 1780.74 $\pm$ 0.00 & 9.26 $\pm$ 0.00 & $-$96.3 & 0.24 $\pm$ 0.00 \\
+7-Day Rolling Mean & 928.50 $\pm$ 0.00 & 1256.99 $\pm$ 0.00 & 7.02 $\pm$ 0.00 & $-$46.6 & 0.62 $\pm$ 0.00 \\
+XGBoost (Level) & 819.35 $\pm$ 0.00 & 1111.63 $\pm$ 0.00 & 5.89 $\pm$ 0.00 & $-$29.4 & 0.70 $\pm$ 0.00 \\
+Persistence (Lag-1) & 755.72 $\pm$ 0.00 & 1056.69 $\pm$ 0.00 & 5.71 $\pm$ 0.00 & $-$19.3 & 0.73 $\pm$ 0.00 \\
+Custom Transformer & 729.60 $\pm$ 73.34 & 964.28 $\pm$ 71.75 & 5.36 $\pm$ 0.48 & $-$15.2 & 0.78 $\pm$ 0.03 \\
+CNN-BiGRU-Transformer & 719.97 $\pm$ 103.44 & 955.82 $\pm$ 94.42 & 5.36 $\pm$ 0.72 & $-$13.7 & 0.78 $\pm$ 0.05 \\
+MLP ($14 \times 117$) & 719.51 $\pm$ 71.21 & 994.05 $\pm$ 78.72 & 5.42 $\pm$ 0.51 & $-$13.6 & 0.76 $\pm$ 0.04 \\
+LightGBM & 706.08 $\pm$ 0.00 & 972.54 $\pm$ 0.00 & 5.17 $\pm$ 0.00 & $-$11.5 & 0.77 $\pm$ 0.00 \\
+DLinear (Channel-Indep.) & 698.29 $\pm$ \textbf{2.74} & 980.82 $\pm$ \textbf{1.40} & 5.26 $\pm$ \textbf{0.01} & $-$10.2 & 0.77 $\pm$ 0.00 \\
+BiGRU & 656.35 $\pm$ 57.94 & 892.16 $\pm$ 36.72 & 4.84 $\pm$ 0.37 & $-$3.6 & 0.81 $\pm$ 0.02 \\
+SARIMAX(1,1,1)(1,0,1,7) & 650.47 $\pm$ 0.00 & 908.09 $\pm$ 0.00 & 4.87 $\pm$ 0.00 & $-$2.7 & 0.80 $\pm$ 0.00 \\
+XGBoost-Diff ($\Delta y$) & 642.90 $\pm$ 0.00 & 929.17 $\pm$ 0.00 & 4.76 $\pm$ 0.00 & $-$1.5 & 0.79 $\pm$ 0.00 \\
+Hybrid BiGRU-XGBoost & 635.28 $\pm$ 21.14 & 883.79 $\pm$ 23.28 & 4.70 $\pm$ 0.13 & $-$0.3 & 0.81 $\pm$ 0.01 \\
+Weekday-Adj. Persistence & 633.43 $\pm$ 0.00 & 932.57 $\pm$ 0.00 & 4.76 $\pm$ 0.00 & 0.0 & 0.79 $\pm$ 0.00 \\
+Hybrid BiLSTM-Attn-XGB & 623.38 $\pm$ 25.47 & 866.36 $\pm$ 23.82 & 4.63 $\pm$ 0.17 & $+$1.6 & 0.82 $\pm$ 0.01 \\
+BiLSTM-Attention & 620.91 $\pm$ 29.73 & 870.38 $\pm$ 26.00 & 4.65 $\pm$ 0.22 & $+$2.0 & 0.82 $\pm$ 0.01 \\
+BiLSTM & 615.59 $\pm$ 16.10 & 866.43 $\pm$ 23.76 & 4.57 $\pm$ 0.13 & $+$2.8 & 0.82 $\pm$ 0.01 \\
+Ridge-Diff ($\Delta y$) & 607.07 $\pm$ 0.00 & 872.05 $\pm$ 0.00 & 4.54 $\pm$ 0.00 & $+$4.2 & 0.82 $\pm$ 0.00 \\
+Equal-Weight RNN Ens & 603.23 $\pm$ 6.66 & 845.23 $\pm$ 9.01 & 4.48 $\pm$ 0.05 & $+$4.8 & 0.83 $\pm$ 0.00 \\
+Ridge ($14 \times 117$) & 602.29 $\pm$ 0.00 & 862.98 $\pm$ 0.00 & 4.50 $\pm$ 0.00 & $+$4.9 & 0.82 $\pm$ 0.00 \\
+Val-Opt RNN Ensemble & 599.62 $\pm$ 13.50 & 846.25 $\pm$ 16.06 & 4.46 $\pm$ 0.11 & $+$5.3 & 0.83 $\pm$ 0.01 \\
+PatchTST (Single) & 597.72 $\pm$ 18.30 & 849.07 $\pm$ 9.94 & 4.49 $\pm$ 0.13 & $+$5.6 & 0.83 $\pm$ 0.00 \\
+PatchTST-Diff ($\Delta y$, 3$\times$) & 589.61 $\pm$ 6.23 & 890.85 $\pm$ 6.50 & 4.42 $\pm$ 0.04 & $+$6.9 & 0.81 $\pm$ 0.00 \\
+\textbf{PatchTST-Ensemble (3$\times$)} & \textbf{584.20} $\pm$ 10.71 & \textbf{841.60} $\pm$ 7.78 & \textbf{4.40} $\pm$ 0.08 & \textbf{$+$7.8} & \textbf{0.83 $\pm$ 0.00} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{95\% Hansen Model Confidence Set ($p_{\text{MCS}}$ via block bootstrap, $T_{\max}$ statistic) across the top 12 models on both co-primary losses (MAE and RMSE), confirming a statistically tied leading group ($p_{\text{MCS}} \ge 0.05$).}
+\label{tab:mcs}
+\resizebox{0.92\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Seed-42 MAE $p_{\text{MCS}}$} & \textbf{Seed-42 RMSE $p_{\text{MCS}}$} & \textbf{5-Seed Avg MAE $p_{\text{MCS}}$} & \textbf{5-Seed Avg RMSE $p_{\text{MCS}}$} \\
+\midrule
+PatchTST-Ensemble (3$\times$) & \textbf{1.000} (In) & \textbf{1.000} (In) & \textbf{1.000} (In) & \textbf{0.988} (In) \\
+PatchTST-Diff ($\Delta y$, 3$\times$) & 0.672 (In) & 0.699 (In) & 0.915 (In) & 0.291 (In) \\
+PatchTST (Single) & 0.672 (In) & 0.801 (In) & 0.915 (In) & 0.927 (In) \\
+Val-Opt RNN Ensemble & 0.672 (In) & 0.801 (In) & 0.915 (In) & \textbf{1.000} (In) \\
+Ridge ($14 \times 117$) & 0.672 (In) & 0.801 (In) & 0.915 (In) & 0.476 (In) \\
+Equal-Weight RNN Ens & 0.571 (In) & 0.801 (In) & 0.915 (In) & 0.988 (In) \\
+Ridge-Diff ($\Delta y$) & 0.672 (In) & 0.699 (In) & 0.753 (In) & 0.376 (In) \\
+BiLSTM & 0.415 (In) & 0.699 (In) & 0.915 (In) & 0.890 (In) \\
+BiLSTM-Attention & 0.069 (In) & 0.421 (In) & 0.915 (In) & 0.718 (In) \\
+Hybrid BiLSTM-Attn-XGB & 0.415 (In) & 0.699 (In) & 0.915 (In) & 0.988 (In) \\
+Weekday-Adj. Persistence & 0.415 (In) & 0.196 (In) & 0.122 (In) & 0.021 (Out) \\
+Hybrid BiGRU-XGBoost & 0.006 (Out) & 0.196 (In) & 0.445 (In) & 0.656 (In) \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{HLN-adjusted Diebold--Mariano tests referenced to \texttt{PatchTST-Ensemble (3$\times$)} (Seed-42 MAE = 577.37\,MW; 5-seed ensemble average = 580.92\,MW) with Holm--Bonferroni $p_{\text{Holm}}$ across 23 comparators. Negative $\Delta$MAE favors \texttt{PatchTST-3$\times$}.}
+\label{tab:dm_results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Comparator} & \textbf{S42 MAE} & \textbf{S42 $\Delta$MAE} & \textbf{S42 $p_{\text{Holm}}$} & \textbf{5-Seed MAE} & \textbf{5-Seed $\Delta$MAE} & \textbf{5-Seed $p_{\text{Holm}}$} & \textbf{5-Seed 95\% CI (MW)} \\
+\midrule
+Seasonal Naive (Lag-7) & 1243.25 & $-$665.88 & $<0.001$ & 1243.25 & $-$662.33 & $<0.001$ & $[-838.3, -502.8]$ \\
+7-Day Rolling Mean & 928.50 & $-$351.13 & $<0.001$ & 928.50 & $-$347.57 & $<0.001$ & $[-432.1, -276.5]$ \\
+XGBoost (Level) & 819.35 & $-$241.98 & $<0.001$ & 819.35 & $-$238.42 & $<0.001$ & $[-299.5, -171.9]$ \\
+Persistence (Lag-1) & 755.72 & $-$178.35 & $<0.001$ & 755.72 & $-$174.79 & $<0.001$ & $[-220.0, -129.5]$ \\
+LightGBM & 706.08 & $-$128.71 & $<0.001$ & 706.08 & $-$125.15 & $<0.001$ & $[-161.3, -80.6]$ \\
+Custom Transformer & 694.51 & $-$117.14 & $0.004$ & 701.77 & $-$120.85 & $0.001$ & $[-170.1, -66.2]$ \\
+DLinear (CI) & 694.95 & $-$117.58 & $<0.001$ & 697.76 & $-$116.84 & $<0.001$ & $[-151.9, -77.1]$ \\
+MLP ($14 \times 117$) & 692.58 & $-$115.21 & $<0.001$ & 693.87 & $-$112.94 & $<0.001$ & $[-146.7, -81.7]$ \\
+CNN-BiGRU-Transformer & 675.60 & $-$98.23 & $<0.001$ & 689.57 & $-$108.64 & $<0.001$ & $[-145.0, -70.1]$ \\
+SARIMAX & 650.47 & $-$73.10 & $<0.001$ & 650.47 & $-$69.54 & $0.001$ & $[-102.2, -38.2]$ \\
+XGBoost-Diff ($\Delta y$) & 642.90 & $-$65.54 & $0.067$ & 642.90 & $-$61.98 & $0.104$ & $[-108.0, -17.8]$ \\
+Weekday-Adj. Persistence & 633.43 & $-$56.06 & $0.018$ & 633.43 & $-$52.51 & $0.053$ & $[-92.8, -13.5]$ \\
+BiGRU & 647.98 & $-$70.61 & $0.008$ & 624.69 & $-$43.77 & $0.017$ & $[-67.8, -11.6]$ \\
+Hybrid BiGRU-XGBoost & 668.37 & $-$91.00 & $0.005$ & 608.80 & $-$27.88 & $0.350$ & $[-51.9, -0.2]$ \\
+Ridge-Diff ($\Delta y$) & 607.07 & $-$29.71 & $0.407$ & 607.07 & $-$26.15 & $0.886$ & $[-58.6, +9.1]$ \\
+Ridge ($14 \times 117$) & 602.29 & $-$24.92 & $0.407$ & 602.29 & $-$21.36 & $1.000$ & $[-50.7, +9.1]$ \\
+Equal-Weight RNN Ens & 611.60 & $-$34.23 & $0.407$ & 593.40 & $-$12.47 & $1.000$ & $[-36.0, +14.5]$ \\
+Val-Opt RNN Ensemble & 608.56 & $-$31.19 & $0.407$ & 589.99 & $-$9.07 & $1.000$ & $[-30.6, +16.3]$ \\
+PatchTST (Single) & 601.80 & $-$24.43 & $0.006$ & 589.74 & $-$8.82 & $0.142$ & $[-15.8, -2.4]$ \\
+PatchTST-Diff ($\Delta y$, 3$\times$) & 586.39 & $-$9.02 & $0.588$ & 587.52 & $-$6.60 & $1.000$ & $[-40.8, +24.9]$ \\
 \bottomrule
 \end{tabular}%
 }
@@ -327,111 +342,45 @@ PatchTST (Single) & 576.61 $\pm$ 15.37 & \textbf{855.54} $\pm$ 23.50 & 4.37 $\pm
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.95\textwidth]{fig1_forecast_comparison.pdf}
-    \caption{Actual vs. forecasted national evening peak demand across the 462-day blind test period (Mar 2025--Jun 2026) comparing Val-Opt RNN Ensemble, PatchTST-Ensemble (3$\times$), and level-space XGBoost.}
+    \caption{Actual vs. forecasted national evening peak demand across the 462-day blind test period for the tied leading group (\texttt{PatchTST-3$\times$}, \texttt{Ridge}, and \texttt{Equal-Weight RNN}).}
     \label{fig:forecast_comp}
 \end{figure*}
 
-\subsection{Per-Seed Consistency and Convergence}
-Table~\ref{tab:per_seed} reports per-seed blind-test MAE across all five seeds, and Fig.~\ref{fig:conv} illustrates \texttt{Val-ES} convergence curves. Because sample SD estimates from $n=5$ seeds carry inherent sampling uncertainty, we also report max--min ranges: PatchTST-Ensemble (3$\times$) spans 14.3\,MW (565.5--579.8\,MW, SD 6.68\,MW), Equal-Weight RNN Ensemble spans 20.2\,MW (596.2--616.4\,MW, SD 8.21\,MW), and single PatchTST spans 41.9\,MW (559.0--600.9\,MW, SD 15.37\,MW). Thus, on an equal 3-network budget, PatchTST-Ensemble (3$\times$) achieves both lower mean error and tighter cross-seed dispersion than both RNN ensembles.
-
-\begin{table*}[t]
-\centering
-\caption{Per-seed blind test MAE (MW) and cross-seed range across five random seeds (42, 123, 7, 2024, 999). Best per column in \textbf{bold}.}
-\label{tab:per_seed}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{lccccccc}
-\toprule
-\textbf{Model Architecture} & \textbf{Seed 42} & \textbf{Seed 123} & \textbf{Seed 7} & \textbf{Seed 2024} & \textbf{Seed 999} & \textbf{Mean $\pm$ SD (MW)} & \textbf{Range} \\
-\midrule
-BiGRU & 637.6 & 636.4 & 607.1 & 648.0 & 637.9 & 633.38 $\pm$ 15.41 & 40.9\,MW \\
-BiLSTM-Attention & 629.4 & 681.3 & 638.1 & 615.8 & 595.6 & 632.03 $\pm$ 31.90 & 85.8\,MW \\
-BiLSTM & 622.3 & 624.5 & 618.9 & 646.7 & 613.5 & 625.19 $\pm$ 12.74 & 33.2\,MW \\
-Val-Opt RNN Ensemble & 622.3 & 622.4 & 613.7 & 644.9 & 596.2 & 619.91 $\pm$ 17.60 & 48.7\,MW \\
-Equal-Weight RNN Ensemble & 606.9 & 616.4 & 602.4 & 613.6 & 596.2 & 607.08 $\pm$ 8.21 & 20.2\,MW \\
-Ridge Regression ($14 \times 118$) & 599.1 & 599.1 & 599.1 & 599.1 & 599.1 & 599.09 $\pm$ 0.00 & 0.0\,MW \\
-PatchTST (Single) & \textbf{559.0} & 578.8 & \textbf{573.2} & 600.9 & \textbf{571.3} & 576.61 $\pm$ 15.37 & 41.9\,MW \\
-\textbf{PatchTST-Ensemble (3$\times$)} & 565.5 & \textbf{569.2} & 578.4 & \textbf{579.8} & 579.8 & \textbf{574.53 $\pm$ 6.68} & \textbf{14.3\,MW} \\
-\bottomrule
-\end{tabular}%
-}
-\end{table*}
-
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=0.80\textwidth]{fig2_convergence_curves.pdf}
-    \caption{Multi-seed \texttt{Val-ES} loss convergence (mean $\pm$ 1 SD across five random seeds).}
+    \includegraphics[width=0.82\textwidth]{fig2_convergence_curves.pdf}
+    \caption{Multi-seed \texttt{Val-ES} loss convergence across all eight neural families (mean $\pm$ 1 SD across 5 seeds).}
     \label{fig:conv}
 \end{figure*}
 
-\FloatBarrier
-
-\subsection{HLN-Adjusted Diebold--Mariano Tests with Holm--Bonferroni Control}
-Table~\ref{tab:dm_results} and Fig.~\ref{fig:dm_forest} present finite-sample HLN-adjusted Diebold--Mariano tests ($L_{\text{HAC}}=14$) and 95\% block-bootstrap CIs on 5-seed averaged trajectories (referencing the Val-Opt RNN Ensemble trajectory MAE of 601.41\,MW; note that trajectory-averaged MAEs are lower than per-seed averages in Table~\ref{tab:main_results} due to Jensen variance reduction across seeds). After Holm--Bonferroni multiplicity correction across all 20 comparators, the Val-Opt RNN Ensemble significantly outperforms \textbf{8 of 20 baselines} ($p_{\text{Holm}} \le 0.012$): Seasonal Naive Lag-7, 7-Day Rolling Mean, XGBoost (Level), Lag-1 Persistence, DLinear, LightGBM, Transformer, and CNN-BiGRU-Transformer. Its advantage over SARIMAX is nominally significant ($p = 0.037$) but does not survive Holm--Bonferroni adjustment ($p_{\text{Holm}} = 0.443$), while differences against XGBoost-Diff, Weekday-Adjusted Persistence, Ridge, Equal-Weight RNN Ensemble, and 5-seed-averaged PatchTST-3$\times$ ($+31.2$\,MW, $p=0.134$) are statistically non-significant on 5-seed trajectories. Importantly, in a strict like-for-like single-run 3-network comparison (Seed 42: 3 PatchTST networks vs. 3 RNN networks), PatchTST-Ensemble (3$\times$) (565.5\,MW) significantly outperforms the Val-Opt RNN Ensemble (622.3\,MW; HLN-DM $= 4.42$, $p < 0.001$, $-56.8$\,MW).
-
-\begin{table*}[t]
-\centering
-\caption{HLN-adjusted Diebold--Mariano tests (Newey--West HAC, lag 14), Holm--Bonferroni adjusted $p$-values ($p_{\text{Holm}}$), and 95\% moving-block bootstrap CIs on 5-seed averaged forecast trajectories (Val-Opt RNN Ensemble trajectory MAE = 601.41\,MW). Note: 5-seed averaged trajectories yield lower MAE than per-seed means in Table~\ref{tab:main_results} due to cross-seed variance reduction.}
-\label{tab:dm_results}
-\resizebox{0.96\textwidth}{!}{%
-\begin{tabular}{lcccccc}
-\toprule
-\textbf{Baseline Model} & \textbf{5-Seed Traj. MAE (MW)} & \textbf{HLN-DM} & \textbf{Raw $p$} & \textbf{$p_{\text{Holm}}$} & \textbf{$\Delta$MAE (MW)} & \textbf{95\% Bootstrap CI (MW)} \\
-\midrule
-Seasonal Naive (Lag-7) & 1243.25 & $-6.03$ & $<0.001$ & $<0.001$ & $-641.85$ & $[-826.6, -479.2]$ \\
-7-Day Rolling Mean & 928.50 & $-6.88$ & $<0.001$ & $<0.001$ & $-327.09$ & $[-414.0, -251.3]$ \\
-XGBoost (Level) & 825.17 & $-6.18$ & $<0.001$ & $<0.001$ & $-223.76$ & $[-285.8, -157.0]$ \\
-Persistence (Lag-1) & 755.72 & $-4.79$ & $<0.001$ & $<0.001$ & $-154.31$ & $[-210.0, -101.7]$ \\
-DLinear & 708.91 & $-3.80$ & $<0.001$ & $0.002$ & $-107.50$ & $[-157.4, -54.3]$ \\
-LightGBM & 697.29 & $-3.87$ & $<0.001$ & $0.002$ & $-95.88$ & $[-139.9, -47.2]$ \\
-Custom Transformer & 674.18 & $-3.86$ & $<0.001$ & $0.002$ & $-72.77$ & $[-107.6, -40.2]$ \\
-CNN-BiGRU-Transformer & 653.28 & $-3.34$ & $0.001$ & $0.012$ & $-51.87$ & $[-81.9, -24.0]$ \\
-SARIMAX(1,1,1)(1,0,1,7) & 650.78 & $-2.09$ & $0.037$ & $0.443$ & $-49.37$ & $[-94.2, -10.3]$ \\
-XGBoost-Diff ($\Delta y$) & 641.99 & $-1.62$ & $0.106$ & $1.000$ & $-40.58$ & $[-86.7, +4.6]$ \\
-Weekday-Adj. Persistence & 633.43 & $-1.28$ & $0.201$ & $1.000$ & $-32.03$ & $[-75.5, +11.6]$ \\
-Hybrid BiGRU-XGBoost & 616.63 & $-1.31$ & $0.192$ & $1.000$ & $-15.22$ & $[-35.0, +10.3]$ \\
-BiLSTM-Attention & 612.26 & $-1.18$ & $0.239$ & $1.000$ & $-10.86$ & $[-29.9, +5.2]$ \\
-Hybrid BiLSTM-Attn-XGB & 612.19 & $-1.20$ & $0.231$ & $1.000$ & $-10.78$ & $[-29.5, +5.0]$ \\
-BiGRU & 607.53 & $-0.70$ & $0.484$ & $1.000$ & $-6.12$ & $[-21.1, +13.4]$ \\
-BiLSTM & 602.63 & $-0.21$ & $0.837$ & $1.000$ & $-1.23$ & $[-13.2, +12.8]$ \\
-Ridge Regression ($14 \times 118$) & 599.09 & $+0.11$ & $0.911$ & $1.000$ & $+2.31$ & $[-32.4, +41.8]$ \\
-Equal-Weight RNN Ensemble & 598.96 & $+0.94$ & $0.348$ & $1.000$ & $+2.45$ & $[-2.6, +8.8]$ \\
-PatchTST-Ensemble (3$\times$) & 570.22 & $+1.50$ & $0.134$ & $1.000$ & $+31.18$ & $[-7.1, +68.0]$ \\
-PatchTST (Single) & 567.55 & $+1.65$ & $0.100$ & $1.000$ & $+33.86$ & $[-2.6, +70.9]$ \\
-\bottomrule
-\end{tabular}%
-}
-\end{table*}
-
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=0.86\textwidth]{fig3_dm_forest.pdf}
-    \caption{HLN-adjusted Diebold--Mariano forest plot with 95\% moving-block bootstrap CIs and Holm--Bonferroni significance coloring across all 20 baselines.}
+    \includegraphics[width=0.88\textwidth]{fig3_dm_forest.pdf}
+    \caption{HLN-adjusted Diebold--Mariano forest plot referenced to \texttt{PatchTST-Ensemble (3$\times$)} with Holm--Bonferroni significance coloring across 23 comparators (5-seed ensemble averages).}
     \label{fig:dm_forest}
 \end{figure*}
 
 \FloatBarrier
 
-\subsection{3-Fold Rolling-Origin CV and Unconfounded Fixed-Test Learning Curve}
-Table~\ref{tab:rolling_cv} reports 3-fold expanding-window rolling-origin CV (2023, 2024, 2025--2026), while Table~\ref{tab:learning_curve} and Fig.~\ref{fig:rolling_cv} decouple training-volume effects from year-specific regime shifts on the fixed 2025--2026 test set.
+\subsection{3-Fold Rolling-Origin CV and Within-Period Sensitivity to History Length}
+Table~\ref{tab:rolling_cv} reports 3-fold expanding-window CV (2023, 2024, 2025--2026) and Table~\ref{tab:learning_curve} (Fig.~\ref{fig:rolling_cv}) reports within-period sensitivity to trailing training length on the 2025--2026 split. Across the three chronological years, \textbf{Weekday-Adjusted Persistence achieves the lowest 3-fold mean MAE (551.01\,MW)}, followed closely by \textbf{Ridge-Diff (562.76\,MW)} and \textbf{Ridge (565.54\,MW)}, ahead of SARIMAX (599.35\,MW), XGBoost-Diff (609.93\,MW), Equal-Weight RNN (662.96\,MW), and PatchTST-3$\times$ (696.05\,MW). In Fold~1 (2023), neural models degrade sharply (PatchTST-3$\times$ 907.72\,MW; Equal-Weight RNN 836.13\,MW vs. Weekday Persistence 478.49\,MW and Ridge-Diff 531.16\,MW); in Fold~2 (2024), Equal-Weight RNN (549.51\,MW) and Ridge-Diff (550.06\,MW) trail Weekday Persistence (541.11\,MW) narrowly; only in Fold~3 (2025--2026) does PatchTST-3$\times$ (584.20\,MW) move ahead of Ridge (602.29\,MW) and Weekday Persistence (633.43\,MW).
 
-Across the full 3-fold rolling-origin average, \textbf{Ridge Regression achieves the lowest 3-fold mean MAE (567.79\,MW)}, ahead of \textbf{SARIMAX (598.32\,MW)}, \textbf{XGBoost-Diff (609.63\,MW)}, \textbf{PatchTST-Ensemble (3$\times$) (647.02\,MW)}, and \textbf{Val-Opt RNN Ensemble (652.86\,MW)}. No single model wins every year: Ridge leads Fold~1 (2023: 543.97\,MW, closely followed by SARIMAX at 547.73\,MW while neural models overfit the post-2022 crisis transition and trail Lag-1 persistence at 615.50\,MW); Val-Opt RNN Ensemble narrowly edges out Ridge in Fold~2 (2024: 559.66 vs. 560.32\,MW); and PatchTST-Ensemble (3$\times$) leads Fold~3 (2025--2026: 574.53 vs. 599.09\,MW for Ridge).
-
-Crucially, the \textbf{unconfounded fixed-test learning curve} (Table~\ref{tab:learning_curve}, Fig.~\ref{fig:rolling_cv}b) resolves why Fold~1 penalized deep models: when holding the 2025--2026 blind test set constant and varying only training length from 1.5 to 4.5 years, \textbf{SARIMAX plateaus flat near 651\,MW} (648.7 to 650.8\,MW), whereas \textbf{PatchTST-Ensemble (3$\times$)} outperforms SARIMAX, Ridge, and RNN Ensemble at \textit{every} history length (improving monotonically from 633.0 to 574.5\,MW). Ridge (711.4 to 599.1\,MW) and Val-Opt RNN Ensemble (726.2 to 619.9\,MW) also benefit steadily from additional multi-year history, demonstrating that Fold~1's neural degradation reflected the severe 2022--2023 macroeconomic/fuel-crisis shift rather than pure sample size alone.
+Because Fold~3 is also the fixed test set in Table~\ref{tab:learning_curve}, the learning curve is a \textit{within-period sensitivity check} rather than independent out-of-time confirmation. Within 2025--2026, SARIMAX plateaus near 651\,MW across 1.5--4.5 years of training history, whereas PatchTST-3$\times$ (633.8 to 584.2\,MW), Ridge (762.0 to 602.3\,MW), and Equal-Weight RNN (739.6 to 603.2\,MW) all improve monotonically as training depth increases.
 
 \begin{table*}[t]
 \centering
-\caption{3-fold expanding-window rolling-origin cross-validation across consecutive test years (2023, 2024, 2025--2026) with exact 3-fold means. Best MAE per row in \textbf{bold}.}
+\caption{3-fold expanding-window rolling-origin cross-validation (2023, 2024, 2025--2026) with exact 3-fold means. Best MAE per row in \textbf{bold}.}
 \label{tab:rolling_cv}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lccccccccc}
 \toprule
-\textbf{Rolling Fold} & \textbf{$N_{\text{tr}} / N_{\text{te}}$} & \textbf{Persist.} & \textbf{Lag-7} & \textbf{SARIMAX} & \textbf{Ridge} & \textbf{XGB-Diff} & \textbf{LightGBM} & \textbf{PatchTST-3$\times$} & \textbf{RNN Ens.} \\
+\textbf{Rolling Fold} & \textbf{$N_{\text{tr}} / N_{\text{te}}$} & \textbf{Lag-1} & \textbf{Wkday Persist.} & \textbf{SARIMAX} & \textbf{Ridge} & \textbf{Ridge-Diff} & \textbf{XGB-Diff} & \textbf{Eq-Wt RNN} & \textbf{PatchTST-3$\times$} \\
 \midrule
-Fold 1 (2023) & 922 / 345 & 615.50 & 1075.41 & 547.73 & \textbf{543.97} & 582.84 & 697.30 & 785.94 $\pm$ 84.74 & 779.00 $\pm$ 49.59 \\
-Fold 2 (2024) & 1,282 / 344 & 644.38 & 1195.49 & 596.45 & 560.32 & 604.06 & 653.14 & 580.59 $\pm$ 10.65 & \textbf{559.66 $\pm$ 21.36} \\
-Fold 3 (2025--26) & 1,652 / 462 & 755.72 & 1243.25 & 650.78 & 599.09 & 641.99 & 697.29 & \textbf{574.53 $\pm$ 6.68} & 619.91 $\pm$ 17.60 \\
+Fold 1 (2023) & 922 / 345 & 615.50 & \textbf{478.49} & 548.03 & 533.17 & 531.16 & 582.84 & 836.13 $\pm$ 54.77 & 907.72 $\pm$ 38.29 \\
+Fold 2 (2024) & 1,282 / 344 & 644.38 & \textbf{541.11} & 599.54 & 561.15 & 550.06 & 604.06 & 549.51 $\pm$ 9.74 & 596.23 $\pm$ 10.71 \\
+Fold 3 (2025--26) & 1,652 / 462 & 755.72 & 633.43 & 650.47 & 602.29 & 607.07 & 642.90 & 603.23 $\pm$ 6.66 & \textbf{584.20 $\pm$ 10.71} \\
 \midrule
-\textbf{3-Fold Mean} & --- & 671.87 & 1171.38 & 598.32 & \textbf{567.79} & 609.63 & 682.58 & 647.02 & 652.86 \\
+\textbf{3-Fold Mean} & --- & 671.87 & \textbf{551.01} & 599.35 & 565.54 & 562.76 & 609.93 & 662.96 & 696.05 \\
 \bottomrule
 \end{tabular}%
 }
@@ -439,17 +388,17 @@ Fold 3 (2025--26) & 1,652 / 462 & 755.72 & 1243.25 & 650.78 & 599.09 & 641.99 & 
 
 \begin{table*}[t]
 \centering
-\caption{Unconfounded fixed-test learning curve: blind test set fixed to Mar 2025--Jun 2026 ($n=462$), varying only trailing training window length (1.5 to 4.5 years). Best MAE per row in \textbf{bold}.}
+\caption{Within-period sensitivity to trailing training history on the fixed 2025--2026 blind test set ($n=462$; not an independent test period from Fold~3). Best MAE per row in \textbf{bold}.}
 \label{tab:learning_curve}
 \resizebox{0.88\textwidth}{!}{%
 \begin{tabular}{cccccc}
 \toprule
-\textbf{Training History} & \textbf{Train Windows} & \textbf{SARIMAX (MW)} & \textbf{Ridge (MW)} & \textbf{PatchTST-3$\times$ (MW)} & \textbf{Val-Opt RNN Ens. (MW)} \\
+\textbf{Training History} & \textbf{Train Windows} & \textbf{SARIMAX (MW)} & \textbf{Ridge (MW)} & \textbf{Eq-Wt RNN (MW)} & \textbf{PatchTST-3$\times$ (MW)} \\
 \midrule
-1.5 years & 534 & 648.70 & 711.42 & \textbf{633.05 $\pm$ 18.85} & 726.21 $\pm$ 30.01 \\
-2.5 years & 899 & 653.89 & 655.43 & \textbf{604.52 $\pm$ 4.21} & 657.24 $\pm$ 26.08 \\
-3.5 years & 1,264 & 651.27 & 614.67 & \textbf{582.82 $\pm$ 4.51} & 650.46 $\pm$ 12.35 \\
-4.5 years & 1,652 & 650.78 & 599.09 & \textbf{574.53 $\pm$ 6.68} & 619.91 $\pm$ 17.60 \\
+1.5 years & 534 & 648.30 & 762.00 & 739.60 $\pm$ 35.10 & \textbf{633.80 $\pm$ 17.10} \\
+2.5 years & 899 & 654.00 & 679.10 & 655.50 $\pm$ 1.60 & \textbf{624.90 $\pm$ 20.00} \\
+3.5 years & 1,264 & 650.70 & 613.30 & 633.00 $\pm$ 18.30 & \textbf{593.00 $\pm$ 2.80} \\
+4.5 years & 1,652 & 650.50 & 602.30 & 603.20 $\pm$ 6.70 & \textbf{584.20 $\pm$ 10.70} \\
 \bottomrule
 \end{tabular}%
 }
@@ -458,31 +407,67 @@ Fold 3 (2025--26) & 1,652 / 462 & 755.72 & 1243.25 & 650.78 & 599.09 & 641.99 & 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.95\textwidth]{fig13_rolling_cv.pdf}
-    \caption{(a) 3-fold expanding-window rolling-origin cross-validation (2023--2026) and (b) unconfounded fixed-test learning curve holding the 2025--2026 test set constant while varying training length.}
+    \caption{(a) 3-fold expanding-window rolling-origin CV (2023--2026) and (b) within-period sensitivity to trailing training length on the 2025--2026 blind test set.}
     \label{fig:rolling_cv}
 \end{figure*}
 
 \FloatBarrier
 
-\subsection{Static Split Conformal vs. Locally Normalized Adaptive Conformal Inference}
-Table~\ref{tab:conformal} and Fig.~\ref{fig:conformal} compare Static Split Conformal prediction against Locally Normalized Adaptive Conformal Inference (LN-ACI) initialized strictly on the 105-day \texttt{Val-Cal} partition. Static Split Conformal suffers severe distribution-shift failure: because \texttt{Val-Cal} falls predominantly in mild post-monsoon/winter months, fixed intervals achieve only \textbf{59.74\%} coverage at 80\% nominal and \textbf{67.53\%} at 90\% nominal---dropping to \textbf{51.2\%} during high-volatility Summer months.
-
-LN-ACI resolves both under-coverage and seasonal heteroscedasticity cleanly without look-ahead leakage: empirical blind-test coverage rises to \textbf{79.87\%} (80\% nominal, within 0.13\,pp) and \textbf{89.61\%} (90\% nominal, within 0.39\,pp), while proper Winkler scores drop by \textbf{$-$381.6\,MW} ($-10.7\%$) at 80\% and \textbf{$-$1,068.9\,MW} ($-20.3\%$) at 90\%. Across all four seasons at the 90\% nominal level, LN-ACI maintains near-exact coverage while dynamically adapting interval width to volatility: Winter \textbf{88.9\%} (2,319\,MW width), Post-Monsoon \textbf{89.8\%} (1,856\,MW), Monsoon \textbf{90.1\%} (2,891\,MW), and Summer \textbf{89.5\%} (4,463\,MW).
+\subsection{5-Way Conformal Uncertainty Ablation on Untouched \texttt{Val-Cal} Residuals}
+Tables~\ref{tab:conformal}--\ref{tab:conformal_seasonal} and Fig.~\ref{fig:conformal} dissect our 5-way conformal ablation on the \textit{untouched} 105-day \texttt{Val-Cal} residuals of both \texttt{PatchTST-3$\times$} and \texttt{Ridge}. Separating local normalization from online $\alpha_t$ adaptation uncovers an explicit \textbf{efficiency vs.\ uniformity trade-off}:
+\begin{itemize}
+    \item \textbf{Static Split Conformal} fails under mild-to-hot seasonal shift (70.8\% PICP at 90\% nominal on PatchTST-3$\times$; 53.1\% in Summer; Winkler 4,869\,MW).
+    \item \textbf{Rolling-Window Conformal (120d)} eliminates most under-coverage (87.2\% overall PICP, Winkler 3,847\,MW) but still lags in Summer (74.7\% PICP) as errors jump faster than a 120-day unweighted window adapts.
+    \item \textbf{Plain ACI (No Local Scale)} achieves the \textbf{lowest proper Winkler score across both models and both nominal levels}: 2,891\,MW (80\%, 79.4\% PICP) and \textbf{3,636\,MW} (90\%, 88.1\% PICP, 2,404\,MW width) on PatchTST-3$\times$ ($-25.3\%$ vs. static, $-5.5\%$ vs. rolling window), and \textbf{3,702\,MW} at 90\% on Ridge---though Summer coverage sits slightly below nominal (84.6\%).
+    \item \textbf{Locally Normalized Static} restores Summer coverage (91.4\%) via the 14-day rolling scale alone, at the cost of slight over-coverage (92.4\% overall, 3,125\,MW width).
+    \item \textbf{Locally Normalized ACI (LN-ACI)} achieves the \textbf{tightest seasonal coverage uniformity across all four seasons} (88.9\% Winter, 88.1\% Post-Monsoon, 89.4\% Monsoon, \textbf{90.1\% Summer}; 89.4\% overall on PatchTST-3$\times$ and 89.6\% on Ridge), trading a wider mean band (2,878 vs. 2,404\,MW; Winkler 3,957 vs. 3,636\,MW) for reliable peak-summer protection.
+\end{itemize}
 
 \begin{table*}[t]
 \centering
-\caption{Conformal prediction intervals on the 462-day blind test set (initialized strictly on the 105-day \texttt{Val-Cal} split): Static Split Conformal vs. Locally Normalized ACI.}
+\caption{5-way conformal prediction ablation on untouched 105-day \texttt{Val-Cal} residuals for both \texttt{PatchTST-Ensemble (3$\times$)} and \texttt{Ridge} (462 blind test days). Lowest Winkler and closest PICP per block in \textbf{bold}.}
 \label{tab:conformal}
-\resizebox{0.92\textwidth}{!}{%
-\begin{tabular}{lcccccc}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccc}
 \toprule
-\textbf{Calibration Method} & \textbf{Nominal} & \textbf{Mean Half-Width (MW)} & \textbf{Mean Width (MW)} & \textbf{PICP (\%)} & \textbf{PINAW (\%)} & \textbf{Winkler (MW)} \\
+\textbf{Base Model} & \textbf{Conformal Method} & \textbf{Nominal} & \textbf{Mean Width (MW)} & \textbf{PICP (\%)} & \textbf{PINAW (\%)} & \textbf{Winkler (MW)} \\
 \midrule
-Static Split Conformal & 80\% & $\pm$527.48 & 1,054.95 & 59.74 & 10.26 & 3,556.06 \\
-\textbf{Locally Normalized ACI} & \textbf{80\%} & $\pm$1,084.90 & 2,169.79 & \textbf{79.87} & 21.09 & \textbf{3,174.42} \\
+\multirow{5}{*}{PatchTST-3$\times$} & 1. Static Split Conformal & 80\% & 980.6 & 58.66 & 9.53 & 3,435.8 \\
+ & 2. Rolling-Window Conformal (120d) & 80\% & 1,627.1 & 76.41 & 15.82 & 3,040.6 \\
+ & 3. Locally Normalized Static & 80\% & 1,710.6 & 74.89 & 16.63 & 2,932.4 \\
+ & 4. Plain ACI (No Local Scale) & 80\% & 1,859.1 & 79.44 & 18.07 & \textbf{2,890.6} \\
+ & 5. Locally Normalized ACI (LN-ACI) & 80\% & 2,048.8 & \textbf{79.87} & 19.92 & 2,990.3 \\
 \midrule
-Static Split Conformal & 90\% & $\pm$680.11 & 1,360.22 & 67.53 & 13.22 & 5,259.34 \\
-\textbf{Locally Normalized ACI} & \textbf{90\%} & $\pm$1,599.31 & 3,198.62 & \textbf{89.61} & 31.09 & \textbf{4,190.43} \\
+\multirow{5}{*}{PatchTST-3$\times$} & 1. Static Split Conformal & 90\% & 1,378.8 & 70.78 & 13.40 & 4,869.4 \\
+ & 2. Rolling-Window Conformal (120d) & 90\% & 2,309.3 & 87.23 & 22.45 & 3,847.2 \\
+ & 3. Locally Normalized Static & 90\% & 3,124.8 & 92.42 & 30.38 & 3,974.9 \\
+ & 4. Plain ACI (No Local Scale) & 90\% & 2,403.9 & 88.10 & 23.37 & \textbf{3,636.4} \\
+ & 5. Locally Normalized ACI (LN-ACI) & 90\% & 2,878.5 & \textbf{89.39} & 27.98 & 3,956.8 \\
+\midrule
+\multirow{5}{*}{Ridge ($14 \times 117$)} & 1. Static Split Conformal & 90\% & 1,543.9 & 71.65 & 15.01 & 4,977.5 \\
+ & 2. Rolling-Window Conformal (120d) & 90\% & 2,475.0 & 87.23 & 24.06 & 3,976.4 \\
+ & 3. Locally Normalized Static & 90\% & 2,886.4 & 90.26 & 28.06 & 3,787.7 \\
+ & 4. Plain ACI (No Local Scale) & 90\% & 2,385.2 & 88.53 & 23.19 & \textbf{3,701.6} \\
+ & 5. Locally Normalized ACI (LN-ACI) & 90\% & 2,849.0 & \textbf{89.61} & 27.70 & 3,864.3 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{Seasonal 90\% conformal coverage (PICP \%) and mean interval width (MW) on \texttt{PatchTST-Ensemble (3$\times$)} across all five calibration wrappers.}
+\label{tab:conformal_seasonal}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccccc}
+\toprule
+\textbf{Method (90\% Nominal)} & \textbf{Overall PICP} & \textbf{Winkler} & \textbf{Winter PICP} & \textbf{Winter W} & \textbf{PostMon PICP} & \textbf{PostMon W} & \textbf{Monsoon PICP} & \textbf{Monsoon W} & \textbf{Summer PICP} & \textbf{Summer W} \\
+\midrule
+1. Static Split Conformal & 70.8\% & 4,869 & 87.8\% & 1,379 & 78.0\% & 1,379 & 76.8\% & 1,379 & 53.1\% & 1,379 \\
+2. Rolling-Window (120d) & 87.2\% & 3,847 & 91.1\% & 1,736 & 93.2\% & 1,998 & 96.0\% & 2,797 & 74.7\% & 2,287 \\
+3. Locally Norm. Static & 92.4\% & 3,975 & 91.1\% & 1,985 & 93.2\% & 2,455 & 94.0\% & 3,093 & 91.4\% & 4,031 \\
+4. Plain ACI & 88.1\% & \textbf{3,636} & 88.9\% & 1,490 & 88.1\% & 1,747 & 91.4\% & 2,599 & 84.6\% & 2,969 \\
+5. Locally Norm. ACI & \textbf{89.4\%} & 3,957 & \textbf{88.9\%} & 1,915 & \textbf{88.1\%} & 2,159 & \textbf{89.4\%} & 2,673 & \textbf{90.1\%} & 3,867 \\
 \bottomrule
 \end{tabular}%
 }
@@ -491,28 +476,72 @@ Static Split Conformal & 90\% & $\pm$680.11 & 1,360.22 & 67.53 & 13.22 & 5,259.3
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.95\textwidth]{fig11_conformal_intervals.pdf}
-    \caption{Prediction intervals (80\% and 90\% nominal) on the 462-day blind test set: (a) Static Split Conformal under-covers summer volatility (67.5\% PICP at 90\%), whereas (b) Locally Normalized ACI restores 89.6\% coverage and adapts width across seasons.}
+    \caption{90\% prediction intervals on \texttt{PatchTST-Ensemble (3$\times$)} across the 462 blind test days comparing (a) Static Split Conformal, (b) Rolling-Window Conformal (120d), and (c) Locally Normalized ACI.}
     \label{fig:conformal}
 \end{figure*}
 
 \FloatBarrier
 
-\subsection{Validation-First 5-Seed Feature and PCA Ablation}
-Table~\ref{tab:ablation} and Fig.~\ref{fig:abl_reg}(a) report controlled 5-seed ablations on the Val-Opt RNN Ensemble across both \texttt{Val-Cal} (design) and Blind Test partitions with paired two-sided $t$-tests against the Base configuration ($n=5$ seeds). Three honest conclusions replace earlier overstated claims: (i) none of the overall blind-test MAE differences reach statistical significance at $p < 0.05$ across five seeds ($p = 0.224$--$0.933$); (ii) on the 41-day Holiday/Eid subset (spanning only four major multi-day Eid festivals in the test set), adding $\text{CDD}_{26}$ accounts for $-7.0$\,MW ($1,022.4 \to 1,015.4$\,MW) while adding Eid lead/lag flags accounts for an incremental \textbf{$-$41.2\,MW} ($1,015.4 \to 974.2$\,MW); and (iii) under the separated \texttt{Val-ES}/\texttt{Val-Cal} split, 95\%-variance PCA (25 components) lowers both \texttt{Val-Cal} MAE (293.7 vs. 308.3\,MW), blind-test MAE (602.1 vs. 619.9\,MW, $p = 0.224$ ns), and Holiday MAE (872.8 vs. 974.2\,MW), suggesting that dimensionality reduction can act as a helpful regularizer when early-stopping validation samples are modest ($N_{\text{val-ES}}=105$).
+\subsection{Feature Ablation, Regimes, Demand Bins, and Direct Permutation Importance}
+Table~\ref{tab:ablation} and Fig.~\ref{fig:abl_reg}(a) evaluate feature and PCA ablations directly on \texttt{PatchTST-3$\times$} and \texttt{Ridge}. Adding detrended $\text{CDD}_{25}$ and 3-day Eid flags yields small, statistically non-significant overall test reductions on five seeds ($589.9 \to 585.2 \to 584.2$\,MW, $p = 0.237$; Ridge $608.8 \to 602.3$\,MW), while cutting \texttt{PatchTST-3$\times$} error on the 41 Holiday/Eid days by $-101.4$\,MW ($1,031.6 \to 930.3$\,MW; note this rests on four major Eid cycles). Conversely, 95\%-variance PCA significantly degrades \texttt{PatchTST-3$\times$} by \textbf{$+83.1$\,MW} ($667.3 \pm 26.0$\,MW, paired $p = 0.006$) and degrades \texttt{Ridge} by $+33.5$\,MW ($635.8$\,MW), confirming that preserving unreduced feature structure matters for both patched attention and linear shrinkage.
+
+Tables~\ref{tab:regime}--\ref{tab:demand_bins} and Figs.~\ref{fig:demand_bins}--\ref{fig:qual_events} highlight important operational trade-offs across regimes: \texttt{PatchTST-3$\times$} leads Summer (814.3\,MW), Monsoon (522.2\,MW), Working Weekdays (537.1\,MW), and High 13--15\,GW load (586.0\,MW); \texttt{Equal-Weight RNN} leads Winter (327.5\,MW) and Moderate 11--13\,GW (480.6\,MW); \textbf{\texttt{Ridge} achieves the lowest Holiday/Eid MAE (867.9\,MW)}, outperforming Equal-Weight RNN (892.6\,MW), XGBoost-Diff (894.1\,MW), and PatchTST-3$\times$ (926.7\,MW); and on $>15$\,GW peaks ($n=160$), Weekday-Adjusted Persistence (518.1\,MW) slightly edges out PatchTST-3$\times$ (533.6\,MW) and Ridge (560.4\,MW) due to strong high-load autocorrelation, while differenced XGBoost (605.8\,MW) cuts level-XGBoost error (1,084.8\,MW) by 44.2\%.
+
+Fig.~\ref{fig:shap} reports \textbf{Direct Group Permutation Importance} on deployed \texttt{PatchTST-3$\times$}---explaining the actual forecasting model rather than a weaker tree-surrogate SHAP approximation \citep{lundberg2017shap}---using a \textit{merged} Autoregressive Load History block ($k=43$ national and divisional load features) to avoid splitting collinear yesterday-load signals. Permuting Autoregressive Load History raises MAE by \textbf{$+1,544.8 \pm 73.9$\,MW}, followed by Day-of-Week \& Monthly Seasonality ($+151.7 \pm 13.1$\,MW), Holiday/Eid Flags ($+26.7 \pm 6.5$\,MW), lagged Temperature \& $\text{CDD}_{25}$ ($+11.8 \pm 3.9$\,MW), and Generation Constraints ($+3.1 \pm 5.2$\,MW, indistinguishable from zero).
 
 \begin{table*}[t]
 \centering
-\caption{Validation-first 5-seed feature and PCA ablation on the Val-Opt RNN Ensemble (reporting both \texttt{Val-Cal} MAE and Blind Test MAE with paired $t$-test $p$-values vs. Base).}
+\caption{Validation-first 5-seed feature and PCA ablation on \texttt{PatchTST-Ensemble (3$\times$)} and \texttt{Ridge}, with paired $t$-test $p$-values vs. Base for \texttt{PatchTST-3$\times$}.}
 \label{tab:ablation}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lcccccc}
+\begin{tabular}{lccccccc}
 \toprule
-\textbf{Feature Configuration} & \textbf{Dims} & \textbf{\texttt{Val-Cal} MAE (MW)} & \textbf{Test MAE (MW)} & \textbf{Paired $p$ vs. Base} & \textbf{Holiday/Eid MAE (MW)} & \textbf{Test Acc. (\%)} \\
+\textbf{Feature Configuration} & \textbf{Dims} & \textbf{PT3 \texttt{Val-Cal}} & \textbf{PT3 Test MAE (MW)} & \textbf{Paired $p$} & \textbf{PT3 Holiday MAE} & \textbf{Ridge \texttt{Val-Cal}} & \textbf{Ridge Test MAE} \\
 \midrule
-1. Base (No $\text{CDD}_{26}$, No Eid Flags) & 111 & 335.37 $\pm$ 11.75 & 620.91 $\pm$ 16.11 & --- & 1,022.39 & 95.36 \\
-2. + Subtropical $\text{CDD}_{26}$ & 112 & 332.94 $\pm$ 20.91 & 615.19 $\pm$ 14.70 & 0.625 (ns) & 1,015.40 & 95.40 \\
-3. + Eid Lead/Lag (Full No-PCA) & 118 & 308.32 $\pm$ 24.41 & 619.91 $\pm$ 17.60 & 0.933 (ns) & 974.17 & 95.37 \\
-4. Full + PCA (95\% Variance) & 25 & \textbf{293.67 $\pm$ 37.26} & \textbf{602.08 $\pm$ 18.08} & 0.224 (ns) & \textbf{872.85} & \textbf{95.56} \\
+1. Base (No $\text{CDD}_{25}$, No Eid) & 110 & 298.4 & 589.86 $\pm$ 8.01 & --- & 1,027.1 & 354.1 & 608.77 \\
+2. + Detrended $\text{CDD}_{25}$ & 111 & 305.4 & 585.17 $\pm$ 3.26 & 0.265 (ns) & 1,031.6 & 347.4 & 609.20 \\
+\textbf{3. + Eid Lead/Lag (Full)} & \textbf{117} & \textbf{297.6} & \textbf{584.20 $\pm$ 10.71} & 0.237 (ns) & \textbf{930.3} & \textbf{344.6} & \textbf{602.29} \\
+4. Full + PCA (95\% Variance) & 24 & 367.2 & 667.28 $\pm$ 26.04 & \textbf{0.006}$^{**}$ & 982.9 & 479.0 & 635.77 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{Seasonal and calendar regime MAE (MW) across leading models and baselines (462 blind test days, 5-seed ensemble averages). Best per row in \textbf{bold}.}
+\label{tab:regime}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccccc}
+\toprule
+\textbf{Axis} & \textbf{Regime} & \textbf{$N$} & \textbf{PatchTST-3$\times$} & \textbf{Ridge} & \textbf{Eq-Wt RNN} & \textbf{XGB-Diff} & \textbf{Wkday Persist.} & \textbf{Lag-1 Persist.} \\
+\midrule
+\multirow{4}{*}{Season} & Winter (Dec--Feb) & 90 & 358.4 & 347.1 & \textbf{327.5} & 362.2 & 409.2 & 596.6 \\
+ & Post-Monsoon (Oct--Nov) & 59 & 430.0 & \textbf{420.0} & 451.7 & 464.8 & 433.5 & 581.9 \\
+ & Monsoon (Jun--Sep) & 151 & \textbf{522.2} & 552.3 & 547.7 & 612.6 & 564.0 & 700.4 \\
+ & Summer (Mar--May) & 162 & \textbf{814.3} & 857.1 & 835.3 & 892.0 & 895.6 & 959.0 \\
+\midrule
+\multirow{3}{*}{Calendar} & Working Weekday & 302 & \textbf{537.1} & 558.0 & 560.7 & 571.8 & 566.3 & 568.6 \\
+ & Weekend (Fri--Sat) & 119 & \textbf{572.9} & 623.2 & 573.3 & 736.9 & 692.8 & 1136.2 \\
+ & Holiday / Eid & 41 & 926.7 & \textbf{867.9} & 892.6 & 894.1 & 955.8 & 1029.6 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{Blind-test MAE (MW) stratified by peak demand bin (5-seed ensemble averages). Best per row in \textbf{bold}.}
+\label{tab:demand_bins}
+\resizebox{0.94\textwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Peak Demand Bin} & \textbf{$N$} & \textbf{PatchTST-3$\times$} & \textbf{Ridge} & \textbf{Eq-Wt RNN} & \textbf{XGB-Diff ($\Delta y$)} & \textbf{XGB (Level)} & \textbf{Wkday Persist.} \\
+\midrule
+Low ($<11$\,GW) & 38 & 895.4 & 838.8 & 819.5 & \textbf{799.7} & 872.0 & 956.3 \\
+Moderate (11--13\,GW) & 118 & 537.6 & 517.6 & \textbf{480.6} & 507.6 & 555.5 & 535.3 \\
+High (13--15\,GW) & 146 & \textbf{586.0} & 655.0 & 616.8 & 752.1 & 728.0 & 755.0 \\
+Extreme Peak ($>15$\,GW) & 160 & 533.6 & 560.4 & 601.5 & 605.8 & 1084.8 & \textbf{518.1} \\
 \bottomrule
 \end{tabular}%
 }
@@ -521,122 +550,74 @@ Table~\ref{tab:ablation} and Fig.~\ref{fig:abl_reg}(a) report controlled 5-seed 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.95\textwidth]{fig4_ablation_regime.pdf}
-    \caption{(a) Controlled 5-seed feature and PCA ablation on the Val-Opt RNN Ensemble and (b) seasonal regime MAE breakdown across Lag-1 Persistence, XGBoost-Diff, PatchTST-Ensemble (3$\times$), and Val-Opt RNN Ensemble.}
+    \caption{(a) Validation-first feature and PCA ablation on \texttt{PatchTST-3$\times$} and \texttt{Ridge} and (b) seasonal MAE breakdown across leading models.}
     \label{fig:abl_reg}
 \end{figure*}
 
-\FloatBarrier
-
-\subsection{Regime, Demand-Bin, Gap-Sensitivity, and Qualitative Diagnostics}
-Tables~\ref{tab:regime}--\ref{tab:demand_bins} and Fig.~\ref{fig:demand_bins} stratify errors by season, calendar regime, and peak demand magnitude. On the 160 extreme-peak days ($>15$\,GW), \textbf{PatchTST-Ensemble (3$\times$) achieves 444.7\,MW MAE}, ahead of Val-Opt RNN Ensemble (569.1\,MW, 3.55\% MAPE) and \textbf{XGBoost-Diff ($\Delta y$) (601.8\,MW)}, whereas raw-level XGBoost collapses to 1,097.7\,MW---demonstrating both that differencing eliminates $\sim$85\% of tree extrapolation bias and that patched Transformers retain a further $-157.1$\,MW advantage over differenced trees during extreme peaks. On Friday--Saturday weekends ($n=119$), Weekday-Adjusted Persistence cuts raw Lag-1 error from 1,136.2 to 692.8\,MW, while PatchTST-3$\times$ (539.9\,MW) and Val-Opt RNN Ensemble (559.9\,MW) reduce weekend error by an additional 19\%--22\%. Auditing reporting gaps in the test set shows negligible impact on accuracy: the 3 post-gap blind-test days exhibit 603.4\,MW MAE vs. 601.4\,MW across the 459 regular days. Fig.~\ref{fig:qual_events} illustrates 30-day Winter and Summer/Eid trajectories.
-
-\begin{table*}[t]
-\centering
-\caption{Seasonal and calendar regime MAE (MW) across the 462-day blind test set (5-seed trajectories). Best MAE per row in \textbf{bold}.}
-\label{tab:regime}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{llccccccc}
-\toprule
-\textbf{Axis} & \textbf{Regime} & \textbf{$N$} & \textbf{PatchTST-3$\times$} & \textbf{RNN Ens.} & \textbf{XGB-Diff} & \textbf{XGB (Level)} & \textbf{Wkday Persist.} & \textbf{Lag-1 Persist.} \\
-\midrule
-\multirow{4}{*}{Season} & Winter (Dec--Feb) & 90 & \textbf{343.7} & 347.9 & 357.9 & 419.5 & 409.2 & 596.6 \\
- & Post-Monsoon (Oct--Nov) & 59 & 438.7 & 469.3 & 467.5 & 550.2 & \textbf{433.5} & 581.9 \\
- & Monsoon (Jun--Sep) & 151 & \textbf{502.3} & 535.0 & 609.8 & 919.4 & 564.0 & 700.4 \\
- & Summer (Mar--May) & 162 & \textbf{807.2} & 852.2 & 893.4 & 1062.9 & 895.6 & 959.0 \\
-\midrule
-\multirow{3}{*}{Calendar} & Working Weekday & 302 & \textbf{527.6} & 571.5 & 571.5 & 749.5 & 566.3 & 568.6 \\
- & Weekend (Fri--Sat) & 119 & \textbf{539.9} & 559.9 & 736.5 & 911.5 & 692.8 & 1136.2 \\
- & Holiday / Eid & 41 & 972.0 & 942.2 & \textbf{886.6} & 1131.8 & 955.8 & 1029.6 \\
-\bottomrule
-\end{tabular}%
-}
-\end{table*}
-
-\begin{table*}[t]
-\centering
-\caption{Blind-test MAE (MW) stratified by peak demand bin (5-seed trajectories). Best MAE per row in \textbf{bold}.}
-\label{tab:demand_bins}
-\resizebox{0.94\textwidth}{!}{%
-\begin{tabular}{lccccccc}
-\toprule
-\textbf{Peak Demand Bin} & \textbf{$N$} & \textbf{PatchTST-3$\times$} & \textbf{RNN Ens.} & \textbf{XGB-Diff ($\Delta y$)} & \textbf{XGB (Level)} & \textbf{Lag-1 Persist.} & \textbf{RNN MAPE (\%)} \\
-\midrule
-Low ($<11$\,GW) & 38 & 919.2 & 840.3 & \textbf{796.1} & 931.8 & 1312.3 & 8.78\% \\
-Moderate (11--13\,GW) & 118 & 546.3 & 514.4 & \textbf{506.1} & 535.0 & 630.5 & 4.31\% \\
-High (13--15\,GW) & 146 & \textbf{636.3} & 644.9 & 755.7 & 733.3 & 843.3 & 4.57\% \\
-\textbf{Extreme Peak ($>15$\,GW)} & \textbf{160} & \textbf{444.7} & 569.1 & 601.8 & 1097.7 & 635.9 & \textbf{3.55\%} \\
-\bottomrule
-\end{tabular}%
-}
-\end{table*}
-
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=0.86\textwidth]{fig6_demand_bins.pdf}
-    \caption{Blind-test MAE by peak demand bin showing how differenced-target XGBoost resolves level-tree clipping above 15\,GW while PatchTST-Ensemble (3$\times$) achieves the lowest extreme-peak error (444.7\,MW).}
+    \includegraphics[width=0.88\textwidth]{fig6_demand_bins.pdf}
+    \caption{Blind-test MAE by peak demand bin comparing Weekday-Adjusted Persistence, level vs. differenced XGBoost, \texttt{Ridge}, and \texttt{PatchTST-3$\times$}.}
     \label{fig:demand_bins}
 \end{figure*}
 
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.94\textwidth]{fig7_qualitative_events.pdf}
-    \caption{Zoomed 30-day trajectories on (a) a stable Winter regime (Dec 2025--Jan 2026) and (b) a volatile Summer \& Eid-ul-Adha window (May--Jun 2025).}
+    \caption{Zoomed 30-day trajectories on (a) Winter (Dec 2025--Jan 2026) and (b) Summer \& Eid-ul-Adha (May--Jun 2025), showing \texttt{Ridge}'s competitiveness on both calm and festival windows.}
     \label{fig:qual_events}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.86\textwidth]{fig9_shap_attribution.pdf}
+    \caption{Direct group permutation importance on deployed \texttt{PatchTST-Ensemble (3$\times$)} using a merged Autoregressive Load History block (15 repeats), avoiding collinear splitting of yesterday's demand.}
+    \label{fig:shap}
 \end{figure*}
 
 \FloatBarrier
 
-\subsection{Same-Split 8-Division Peak Demand Benchmark}
-Eliminating cross-dataset literature comparisons, Table~\ref{tab:divisional} and Fig.~\ref{fig:divisional} benchmark all eight administrative divisions strictly on the same 462-day blind test split against Lag-1 Persistence, Lag-7 Naive, Ridge Regression, and a same-split 3-seed Single BiGRU (replicating the recurrent backbone of \citet{yeaser2025bangladesh}). The 3-seed Val-Opt RNN Ensemble outperforms the same-split Single BiGRU in \textbf{8/8 divisions} ($+0.4\%$ to $+7.5\%$ MAE reduction), outperforms Lag-7 in \textbf{8/8 divisions}, outperforms Lag-1 Persistence in \textbf{7/8 divisions} ($+4.4\%$ to $+25.8\%$; Chattogram is the exception at 85.3 vs. 79.9\,MW), and outperforms Ridge in \textbf{6/8 divisions} (Rajshahi, Khulna, Mymensingh, Rangpur, Barishal, Sylhet), whereas \textbf{Ridge achieves the lowest error in Bangladesh's two largest metropolitan grids: Dhaka (251.7 vs. 262.5\,MW) and Chattogram (74.2 vs. 85.3\,MW)}. Across all eight divisions, ensemble accuracy spans 93.21\%--94.31\%.
+\subsection{Same-Split 8-Division Forecasts and Causal Multi-Horizon Hybrids}
+Table~\ref{tab:divisional} and Fig.~\ref{fig:divisional} evaluate the leading group on all eight administrative divisions strictly on the same 462-day split. A striking spatial reversal emerges: whereas \texttt{PatchTST-3$\times$} leads national aggregate MAE, \textbf{\texttt{Equal-Weight RNN Ensemble} outperforms \texttt{PatchTST-3$\times$} in all 8 of 8 divisions} (winning Rajshahi 80.3, Khulna 90.2, Mymensingh 61.5, Barishal 25.6, and Sylhet 35.6\,MW), while \texttt{Single BiGRU} edges out in Dhaka (249.6\,MW, tied with Ridge 251.2 and Eq-Wt RNN 251.3) and Rangpur (56.2\,MW), and \texttt{Weekday-Adjusted Persistence} / \texttt{Ridge} lead Chattogram (73.0 / 74.3\,MW). Channel-mixing PatchTST overfits noisier single-division series relative to recurrent and L2-linear encoders.
+
+Table~\ref{tab:multihorizon} and Fig.~\ref{fig:multihorizon} evaluate causal direct horizons $h \in \{1, 3, 7, 14, 30\}$ days alongside a \textbf{\texttt{Climatology+Ridge-Residual} hybrid} (shrinking residuals toward seasonal climatology on \texttt{Val-ES}). \texttt{PatchTST-3$\times$} leads at $h=1$ (584.2\,MW), $h=3$ (851.0\,MW), and $h=7$ (1,069.7\,MW, essentially tied with Climatology+Trend at 1,072.5\,MW). Beyond one week ($h=14, 30$), direct unconstrained models drift above climatology (PatchTST-3$\times$ 1,154.9 and 1,491.1\,MW; Direct Ridge 1,206.9 and 1,452.2\,MW), whereas the \texttt{Climatology+Ridge-Residual} hybrid cleanly falls back to Climatology+Trend (1,070.8 and 1,071.9\,MW), confirming that direct autoregressive skill dissipates between 7 and 14 days without medium-range NWP forecasts and that residual-hybrid shrinkage eliminates long-horizon drift.
 
 \begin{table*}[t]
 \centering
-\caption{Same-split 8-division peak demand benchmark on the 462-day blind test set (3 seeds for neural models; no cross-dataset published numbers). Best MAE per row in \textbf{bold}.}
+\caption{Same-split 8-division peak demand MAE (MW) on the 462-day blind test set (3 seeds for neural models). Best MAE per row in \textbf{bold}.}
 \label{tab:divisional}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lccccccc}
+\begin{tabular}{lcccccc}
 \toprule
-\textbf{Division} & \textbf{RNN Ens. MAE (MW)} & \textbf{Ens. MAPE (\%)} & \textbf{Single BiGRU (MW)} & \textbf{Ridge (MW)} & \textbf{Lag-1 Persist. (MW)} & \textbf{Lag-7 Naive (MW)} & \textbf{Gain vs. BiGRU} \\
+\textbf{Division} & \textbf{PatchTST-3$\times$} & \textbf{Eq-Wt RNN Ens} & \textbf{Ridge} & \textbf{Single BiGRU} & \textbf{Wkday Persist.} & \textbf{Lag-1 Persist.} \\
 \midrule
-Dhaka (Capital) & 262.51 $\pm$ 15.05 & 6.32 $\pm$ 0.48 & 266.72 & \textbf{251.66} & 353.78 & 547.06 & $+$1.6\% \\
-Chattogram & 85.28 $\pm$ 3.93 & 6.31 $\pm$ 0.28 & 85.66 & \textbf{74.16} & 79.88 & 116.21 & $+$0.4\% \\
-Rajshahi & \textbf{80.01 $\pm$ 0.87} & \textbf{5.92 $\pm$ 0.07} & 86.49 & 92.18 & 89.07 & 145.38 & $+$7.5\% \\
-Khulna & \textbf{90.33 $\pm$ 2.12} & \textbf{5.73 $\pm$ 0.12} & 94.52 & 101.39 & 103.98 & 168.38 & $+$4.4\% \\
-Mymensingh & \textbf{59.90 $\pm$ 0.35} & \textbf{5.69 $\pm$ 0.02} & 61.37 & 64.84 & 69.00 & 106.91 & $+$2.4\% \\
-Rangpur & \textbf{55.38 $\pm$ 1.22} & 6.59 $\pm$ 0.19 & 57.45 & 56.51 & 60.03 & 86.44 & $+$3.6\% \\
-Barishal & \textbf{25.12 $\pm$ 0.24} & \textbf{6.16 $\pm$ 0.07} & 25.64 & 26.20 & 27.68 & 45.22 & $+$2.0\% \\
-Sylhet & \textbf{35.52 $\pm$ 0.92} & \textbf{6.79 $\pm$ 0.19} & 37.49 & 37.80 & 37.15 & 64.16 & $+$5.2\% \\
+Dhaka (Capital) & 290.19 $\pm$ 6.73 & 251.30 $\pm$ 10.28 & 251.21 & \textbf{249.60} & 268.73 & 353.78 \\
+Chattogram & 105.43 $\pm$ 11.26 & 86.47 $\pm$ 3.26 & 74.27 & 83.33 & \textbf{73.00} & 79.88 \\
+Rajshahi & 81.49 $\pm$ 1.91 & \textbf{80.27 $\pm$ 0.38} & 92.40 & 84.62 & 83.69 & 89.07 \\
+Khulna & 94.80 $\pm$ 2.48 & \textbf{90.22 $\pm$ 0.28} & 101.71 & 93.38 & 98.06 & 103.98 \\
+Mymensingh & 64.56 $\pm$ 0.42 & \textbf{61.53 $\pm$ 0.14} & 64.82 & 63.93 & 67.65 & 69.00 \\
+Rangpur & 58.77 $\pm$ 1.70 & 56.82 $\pm$ 0.72 & 56.57 & \textbf{56.15} & 56.90 & 60.03 \\
+Barishal & 27.12 $\pm$ 0.58 & \textbf{25.56 $\pm$ 0.27} & 26.26 & 26.28 & 26.93 & 27.68 \\
+Sylhet & 38.47 $\pm$ 0.31 & \textbf{35.63 $\pm$ 0.69} & 37.79 & 36.21 & 35.92 & 37.15 \\
 \bottomrule
 \end{tabular}%
 }
 \end{table*}
 
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.90\textwidth]{fig5_divisional_benchmark.pdf}
-    \caption{Same-split 8-division peak demand MAPE (462 blind test days) comparing Lag-1 Persistence, Lag-7 Naive, Ridge, 3-seed Single BiGRU, and 3-seed Val-Opt RNN Ensemble (with $\pm 1$ SD error bars on all multi-seed models).}
-    \label{fig:divisional}
-\end{figure*}
-
-\FloatBarrier
-
-\subsection{Strictly Causal Direct Multi-Horizon Forecasting vs. Climatology+Trend}
-Table~\ref{tab:multihorizon} and Fig.~\ref{fig:multihorizon} benchmark direct causal horizons $h \in \{1, 3, 7, 14, 30\}$ days (zero future weather/telemetry) against Origin Persistence, Direct Ridge, and our Climatology + Linear Trend baseline ($\sim$1,070\,MW across horizons). Direct Ridge leads at $h=1, 3, 7$ days (599.1, 848.3, 1,026.6\,MW), while Val-Opt RNN Ensemble leads at $h=14$ days (1,039.8\,MW, beating Origin Persistence by $+25.8\%$ and Climatology+Trend by $+2.9\%$). Beyond two weeks ($h=30$ days), however, \textbf{Climatology + Linear Trend (1,071.9\,MW) outperforms both Val-Opt RNN Ensemble (1,230.7\,MW, $-14.8\%$) and Direct Ridge (1,260.0\,MW)}, empirically establishing $h \approx 14$ days as the causal autoregressive skill ceiling without medium-range numerical weather forecasts.
-
 \begin{table*}[t]
 \centering
-\caption{Strictly causal direct multi-horizon national benchmark ($h = 1, 3, 7, 14, 30$ days; zero future telemetry) vs. Direct Ridge, Climatology+Trend, and Origin Persistence. Best MAE per row in \textbf{bold}.}
+\caption{Strictly causal direct multi-horizon national MAE (MW) across $h = 1, 3, 7, 14, 30$ days (zero future weather/telemetry) comparing \texttt{PatchTST-3$\times$}, \texttt{Equal-Weight RNN}, \texttt{Direct Ridge}, \texttt{Climatology+Ridge-Residual Hybrid}, \texttt{Climatology+Trend}, and \texttt{Origin Persistence}. Best per row in \textbf{bold}.}
 \label{tab:multihorizon}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{cccccccc}
 \toprule
-\textbf{Horizon $h$} & \textbf{$N_{\text{test}}$} & \textbf{RNN Ens. MAE (MW)} & \textbf{Direct Ridge (MW)} & \textbf{Clim.+Trend (MW)} & \textbf{Origin Persist. (MW)} & \textbf{Ens. vs. Persist.} & \textbf{Ens. vs. Clim.} \\
+\textbf{Horizon $h$} & \textbf{$N_{\text{test}}$} & \textbf{PatchTST-3$\times$} & \textbf{Eq-Wt RNN} & \textbf{Direct Ridge} & \textbf{Clim.+Ridge-Resid} & \textbf{Clim.+Trend} & \textbf{Origin Persist.} \\
 \midrule
-$h = 1$\,d & 462 & 619.91 $\pm$ 17.60 & \textbf{599.09} & 1,068.38 & 755.72 & $+$18.0\% & $+$42.0\% \\
-$h = 3$\,d & 460 & 887.81 $\pm$ 9.87 & \textbf{848.34} & 1,069.47 & 1,071.71 & $+$17.2\% & $+$17.0\% \\
-$h = 7$\,d & 456 & 1,031.66 $\pm$ 27.60 & \textbf{1,026.60} & 1,072.53 & 1,240.96 & $+$16.9\% & $+$3.8\% \\
-$h = 14$\,d & 449 & \textbf{1,039.83 $\pm$ 34.20} & 1,126.52 & 1,070.82 & 1,401.60 & $+$25.8\% & $+$2.9\% \\
-$h = 30$\,d & 433 & 1,230.70 $\pm$ 16.78 & 1,260.01 & \textbf{1,071.85} & 1,544.66 & $+$20.3\% & $-$14.8\% \\
+$h = 1$\,d & 462 & \textbf{584.2 $\pm$ 10.7} & 603.2 $\pm$ 6.7 & 602.3 & 990.6 & 1,068.4 & 755.7 \\
+$h = 3$\,d & 460 & \textbf{851.0 $\pm$ 9.0} & 874.7 $\pm$ 18.3 & 864.7 & 1,099.1 & 1,069.5 & 1,071.7 \\
+$h = 7$\,d & 456 & \textbf{1,069.7 $\pm$ 24.9} & 1,083.8 $\pm$ 20.3 & 1,075.1 & 1,072.5 & 1,072.5 & 1,241.0 \\
+$h = 14$\,d & 449 & 1,154.9 $\pm$ 26.3 & 1,128.3 $\pm$ 6.8 & 1,206.9 & \textbf{1,070.8} & \textbf{1,070.8} & 1,401.6 \\
+$h = 30$\,d & 433 & 1,491.1 $\pm$ 25.1 & 1,380.7 $\pm$ 57.8 & 1,452.2 & \textbf{1,071.9} & \textbf{1,071.9} & 1,544.7 \\
 \bottomrule
 \end{tabular}%
 }
@@ -644,59 +625,44 @@ $h = 30$\,d & 433 & 1,230.70 $\pm$ 16.78 & 1,260.01 & \textbf{1,071.85} & 1,544.
 
 \begin{figure*}[t]
     \centering
+    \includegraphics[width=0.92\textwidth]{fig5_divisional_benchmark.pdf}
+    \caption{Same-split 8-division peak demand MAPE (462 blind test days, 3 seeds) showing \texttt{Equal-Weight RNN} outperforming \texttt{PatchTST-3$\times$} across all eight divisions.}
+    \label{fig:divisional}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
     \includegraphics[width=0.94\textwidth]{fig12_multihorizon.pdf}
-    \caption{Strictly causal direct multi-horizon forecasting ($h = 1, 3, 7, 14, 30$ days) compared against Direct Ridge, Climatology+Trend, and Origin Persistence.}
+    \caption{Causal direct multi-horizon forecasting ($h = 1, 3, 7, 14, 30$ days): \texttt{Climatology+Ridge-Residual} eliminates long-horizon drift beyond 7--14 days.}
     \label{fig:multihorizon}
 \end{figure*}
 
 \FloatBarrier
 
-\subsection{Direct Ensemble Permutation Importance and QA Grid Diagnostics}
-Replacing surrogate tree explanations, Fig.~\ref{fig:shap} reports \textbf{Direct Group Permutation Importance} on the actual deployed PyTorch Val-Opt RNN Ensemble (15 repeats across the 462-day blind test set). Permuting lagged \textbf{Divisional Demand \& Supply Telemetry} ($k=27$ features) increases ensemble MAE by \textbf{$+943.6 \pm 58.4$\,MW}, followed by \textbf{Lagged National Peak \& Rolling Stats} ($+337.9 \pm 21.8$\,MW) and \textbf{Day-of-Week \& Seasonality} ($+148.1 \pm 15.1$\,MW). \textbf{Holiday \& Eid Lead/Lag Flags} contribute $+21.4 \pm 3.7$\,MW globally (concentrated on rare festival days), lagged \textbf{Temperature \& $\text{CDD}_{26}$} add $+8.7 \pm 1.6$\,MW incrementally (reflecting strong collinearity with yesterday's thermally driven demand), and \textbf{Generation Constraints/Maintenance} show near-zero incremental impact ($-4.0 \pm 5.7$\,MW).
-
-Fig.~\ref{fig:reliability} summarizes quality-assured descriptive grid diagnostics (2019--2026): after excluding the 16 negative BPDB metering inversions, national peak transmission loss averages \textbf{510.50\,MW} (maximum 2,831\,MW; raw uncleaned average 504.99\,MW). Reported divisional mean net balances ($\text{Supply} - \text{Demand}$) are negative across all eight divisions---largest in Mymensingh ($-38.2$\,MW, exact $-38.25$\,MW), Dhaka ($-25.5$\,MW), and Rangpur ($-13.9$\,MW), and smallest in Barishal ($-1.5$\,MW)---reflecting BPDB's reported regional allocation of unserved load shedding rather than physical transmission corridor thermal limits.
-
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.84\textwidth]{fig9_shap_attribution.pdf}
-    \caption{Direct group permutation importance on the deployed PyTorch Val-Opt RNN Ensemble (mean $\Delta$MAE $\pm$ 1 SD across 15 repeats), showing that lagged divisional/national load inertia and calendar periodicity dominate next-day forecasts.}
-    \label{fig:shap}
-\end{figure*}
-
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.95\textwidth]{fig10_grid_reliability.pdf}
-    \caption{Quality-assured descriptive grid diagnostics (2019--2026): (a) QA-filtered daily peak transmission loss (16 negative BPDB metering inversions excluded; QA mean 510.50\,MW) and (b) reported divisional mean net balance (load-shedding allocation).}
-    \label{fig:reliability}
-\end{figure*}
-
-\FloatBarrier
-
 \subsection{Computational Efficiency Profile}
-Table~\ref{tab:efficiency} and Fig.~\ref{fig:eff} profile parameter counts, fp32 memory footprints, and single-sample CPU inference latencies. All top-performing models execute in well under 2\,ms on standard CPU hardware without GPU acceleration: \textbf{Ridge (14$\times$118)} requires 1,653 parameters and 0.04\,ms; \textbf{PatchTST-Ensemble (3$\times$)} achieves the lowest 2025--2026 test MAE (574.53\,MW) in 366,915 parameters (1.43\,MB) and \textbf{0.69\,ms}; and the 3-branch RNN ensemble requires 792,917 parameters (3.10\,MB) and 1.20\,ms.
+Table~\ref{tab:efficiency} and Fig.~\ref{fig:eff} report exact fp32 memory footprints in binary KiB/MiB ($1\,\text{MiB} = 1,024\,\text{KiB}$) and single-sample CPU latencies. All leading models execute in $\le 1.22$\,ms on standard CPU hardware: \texttt{Ridge} requires 1,639 parameters (\textbf{6.40\,KiB}, 0.05\,ms), \texttt{PatchTST-3$\times$} requires 366,147 parameters (\textbf{1.40\,MiB}, 1.05\,ms), and \texttt{Equal-Weight RNN Ens} requires 791,253 parameters (\textbf{3.02\,MiB}, 1.22\,ms).
 
 \begin{table*}[t]
 \centering
-\caption{Computational efficiency profile across evaluated model families (parameter count, fp32 footprint, single-sample CPU latency, and 5-seed blind-test MAE).}
+\caption{Computational efficiency profile using consistent fp32 binary memory units (1\,MiB = 1,024\,KiB) and single-sample CPU inference latency.}
 \label{tab:efficiency}
-\resizebox{0.86\textwidth}{!}{%
+\resizebox{0.88\textwidth}{!}{%
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Model Architecture} & \textbf{Parameters} & \textbf{fp32 Size (KB)} & \textbf{CPU Latency (ms)} & \textbf{5-Seed Test MAE (MW)} \\
+\textbf{Model Architecture} & \textbf{Parameters} & \textbf{fp32 Footprint} & \textbf{CPU Latency (ms)} & \textbf{5-Seed Test MAE (MW)} \\
 \midrule
-SARIMAX(1,1,1)(1,0,1,7) & 8 & 0.06 & 0.58 & 650.78 \\
-Ridge Regression ($14 \times 118$) & 1,653 & 12.9 & \textbf{0.04} & 599.09 \\
-XGBoost-Diff ($\Delta y$) & --- & --- & 0.07 & 641.99 \\
-LightGBM & --- & --- & 0.21 & 697.29 \\
-DLinear & 3,306 & 12.9 & 0.07 & 881.18 \\
-CNN-BiGRU-Transformer & 42,913 & 167.6 & 0.46 & 680.20 \\
-PatchTST (Single) & 122,305 & 477.8 & 0.23 & 576.61 \\
-BiLSTM-Attention & 168,787 & 659.3 & 0.47 & 632.03 \\
-Custom Transformer & 189,505 & 740.3 & 0.26 & 702.12 \\
-BiGRU & 300,289 & 1,173.0 & 0.37 & 633.38 \\
-BiLSTM & 323,841 & 1,265.0 & 0.36 & 625.19 \\
-\textbf{PatchTST-Ensemble (3$\times$)} & \textbf{366,915} & \textbf{1,433.4} & \textbf{0.69} & \textbf{574.53} \\
-Val-Opt RNN Ensemble (3$\times$) & 792,917 & 3,097.3 & 1.20 & 619.91 \\
+SARIMAX(1,1,1)(1,0,1,7) & 8 & 0.03\,KiB & 0.37 & 650.47 \\
+DLinear (Channel-Indep.) & 30 & 0.12\,KiB & 0.06 & 698.29 \\
+Ridge / Ridge-Diff ($14 \times 117$) & 1,639 & 6.40\,KiB & 0.05 & 602.29 / 607.07 \\
+XGBoost-Diff ($\Delta y$) / LightGBM & --- & Tree & 0.06 / 0.22 & 642.90 / 706.08 \\
+CNN-BiGRU-Transformer & 42,817 & 167.25\,KiB & 0.96 & 719.97 \\
+PatchTST (Single) & 122,049 & 476.75\,KiB & 0.35 & 597.72 \\
+BiLSTM-Attention & 168,019 & 656.32\,KiB & 0.48 & 620.91 \\
+Custom Transformer & 189,441 & 740.00\,KiB & 0.26 & 729.60 \\
+MLP ($14 \times 117$) & 218,113 & 852.00\,KiB & \textbf{0.04} & 719.51 \\
+BiGRU / BiLSTM & 299,905 / 323,329 & 1.14 / 1.23\,MiB & 0.36 / 0.38 & 656.35 / 615.59 \\
+\textbf{PatchTST-Ensemble (3$\times$)} & \textbf{366,147} & \textbf{1.40\,MiB} & \textbf{1.05} & \textbf{584.20} \\
+Equal-Weight RNN Ens (3$\times$) & 791,253 & 3.02\,MiB & 1.22 & 603.23 \\
 \bottomrule
 \end{tabular}%
 }
@@ -705,7 +671,7 @@ Val-Opt RNN Ensemble (3$\times$) & 792,917 & 3,097.3 & 1.20 & 619.91 \\
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.94\textwidth]{fig8_efficiency_pareto.pdf}
-    \caption{Computational efficiency analysis: (a) 5-seed blind-test MAE vs. trainable parameter count and (b) single-sample CPU inference latency across model families.}
+    \caption{Computational efficiency analysis: (a) 5-seed blind-test MAE vs. trainable parameter count and (b) single-sample CPU inference latency.}
     \label{fig:eff}
 \end{figure*}
 
@@ -716,39 +682,51 @@ Val-Opt RNN Ensemble (3$\times$) & 792,917 & 3,097.3 & 1.20 & 619.91 \\
 % =========================================================================
 \section{Discussion}
 
-\subsection{Comparative Synthesis: Linear Parsimony vs. Patched Transformers vs. Recurrent Ensembles}
-Evaluating 21 architectures under strict baselines and unconfounded controls yields a substantially more nuanced picture than standard single-split deep-learning papers. First, \textbf{regularized linear modeling (Ridge on $14 \times 118$ features) is remarkably competitive}: it achieves the lowest 3-fold rolling-origin CV mean (567.79\,MW), wins the two largest metropolitan divisions (Dhaka and Chattogram), leads direct 1--7 day horizons, and runs in 0.04\,ms. Second, once sufficient multi-year training history accumulates on a stable regime (as isolated in our fixed-test learning curve, Table~\ref{tab:learning_curve}), \textbf{PatchTST-Ensemble (3$\times$)} consistently outperforms Ridge, SARIMAX, and recurrent ensembles across every training length (1.5--4.5 years), reaching 574.53\,MW overall and 444.7\,MW above 15\,GW using half the parameters of the 3-branch RNN ensemble. Third, within recurrent families, \textbf{Equal-Weight averaging (607.08 $\pm$ 8.21\,MW)} is simpler, lower-error, and more stable than SLSQP convex optimization on a 105-day calibration split (619.91 $\pm$ 17.60\,MW), cautionary evidence against overfitting ensemble weights on short validation blocks.
+\subsection{No Single Winner: Complementary Strengths Across Regimes and Spatial Scales}
+Our 24-model MCS and downstream evaluations demonstrate that no single model dominates every operational task in Bangladesh's grid:
+\begin{itemize}
+    \item \textbf{National day-ahead \& 3-day forecasts (recent regime):} \texttt{PatchTST-3$\times$}, \texttt{PatchTST-Diff}, \texttt{Ridge}, and \texttt{Equal-Weight RNN} form a statistically tied leading group inside the 95\% MCS on both MAE and RMSE, achieving modest $+4.8\%$ to $+7.8\%$ skill over Weekday-Adjusted Persistence.
+    \item \textbf{Multi-year regime robustness \& Holiday/Eid protection:} Across 3-fold rolling-origin CV (2023--2026), \textbf{Weekday-Adjusted Persistence (551.0\,MW)} and \textbf{\texttt{Ridge-Diff} (562.8\,MW)} beat all deep models on the 3-fold mean because neural models suffer large Fold-1 errors (2023). On high-stakes \textbf{Holiday/Eid days} ($n=41$), \textbf{\texttt{Ridge} (867.9\,MW)} outperforms Equal-Weight RNN (892.6\,MW), XGBoost-Diff (894.1\,MW), and PatchTST-3$\times$ (926.7\,MW). Any live deployment relying solely on PatchTST would accept weaker festival accuracy and higher sensitivity to structural shifts.
+    \item \textbf{Divisional vs. national scaling:} On the 8 individual divisions, \textbf{\texttt{Equal-Weight RNN}} beats \texttt{PatchTST-3$\times$} in all 8 divisions, while \texttt{Ridge} and \texttt{Weekday-Adjusted Persistence} match or beat neural models in Dhaka and Chattogram.
+    \item \textbf{Uncertainty efficiency vs. seasonal uniformity:} Our 5-way conformal ablation shows that \textbf{\texttt{Plain ACI}} minimizes proper Winkler score ($3,636$\,MW on PatchTST-3$\times$; $3,702$\,MW on Ridge) with narrower bands ($\sim$2,400\,MW), whereas \textbf{\texttt{LN-ACI}} achieves the tightest seasonal coverage uniformity (88.1\%--90.1\% across all four seasons, lifting Summer coverage from 84.6\% to 90.1\%) at a wider average band ($\sim$2,878\,MW). Operators can therefore select Plain ACI for tighter average reserve margins or LN-ACI when uniform summer-heatwave reliability is prioritized.
+\end{itemize}
 
-\subsection{Why Adaptive Conformal Calibration Matters for Operational Dispatch}
-Static Split Conformal intervals calibrated on mild validation seasons fail severely during subtropical summer heatwaves (51.2\% Summer coverage at 90\% nominal), exposing operators to dangerous under-provisioning of spinning reserves. By combining a causal 14-day rolling error scale with online miscoverage feedback, \textbf{Locally Normalized ACI} maintains 88.9\%--90.1\% empirical coverage across all four seasons while narrowing intervals during calm winter/post-monsoon periods (1,856--2,319\,MW width) and expanding them proactively during heatwave peaks (4,463\,MW width), reducing the proper Winkler score by 20.3\%.
-
-\subsection{Limitations and Practical Guidance for Developing-Grid Operators}
-Five concrete limitations bound our findings and motivate future operational integration:
-\begin{enumerate}
-    \item \textbf{Absence of Day-Ahead Numerical Weather Prediction (NWP) and Humidity:} All models use strictly lagged observed daily maximum temperatures ($T_{t-14:t-1}$) without live day-ahead NWP forecasts ($\hat{T}_t$), daily mean/minimum temperatures, or wet-bulb humidity/heat index. This explains why lagged temperature adds only $+8.7$\,MW in direct permutation importance once yesterday's demand is known, and why direct models lose skill to Climatology+Trend beyond 14 days.
-    \item \textbf{Policy-Influenced Target and Missing Operator Benchmark:} BPDB's generation-end peak demand embeds estimated unserved load shedding, introducing curtailment noise; additionally, because BPDB publicly archives only morning minimum-generation forecasts, direct comparison against NLDC's internal evening-peak dispatch tool was not possible.
-    \item \textbf{Small Festival Sample and Moon-Sighting Uncertainty:} Only four major multi-day Eid festivals occur within the 462-day test window, limiting statistical power for holiday ablations, and live Eid flags remain subject to $\pm 1$-day lunar-sighting confirmation.
-    \item \textbf{Shared Neural Hyperparameters and Single-Split Selection Sensitivity:} Using a single shared AdamW learning rate and patience schedule across diverse deep architectures may favor architectures well aligned with that schedule; per-family Bayesian tuning on nested validation folds is left to future work.
-    \item \textbf{Operational Implications (Conservative Framing):} Rather than extrapolating speculative monetary savings against naive persistence, practical NLDC adoption should deploy a lightweight dual-model workflow---combining \textbf{PatchTST-Ensemble (3$\times$)} (0.69\,ms) with \textbf{Ridge} (0.04\,ms) as a linear sanity check and wrapping point forecasts in \textbf{LN-ACI} bounds for season-adaptive spinning-reserve sizing. Integrating utility-scale solar forecasts (e.g., Rangpur's 200\,MW Teesta Solar plant) with regional demand forecasts further enables net-load ramp planning.
-\end{enumerate}
+\subsection{Limitations and Future Work}
+Five limitations bound our findings: (i) \textbf{single 15-month test period:} although 2023 and 2024 are evaluated in rolling CV, the main 24-model comparison uses one 2025--2026 test window (no public BPDB archive beyond June 2026 was available at submission); (ii) \textbf{missing day-ahead NWP weather and humidity:} models rely solely on lagged single-station Dhaka daily maximum temperature without live NWP temperature forecasts, daily minima, or wet-bulb humidity, explaining why lagged temperature adds only $+11.8$\,MW in permutation importance and why direct models lose skill past 7--14 days; (iii) \textbf{offline foundation-model gap:} pretrained foundation models (e.g., Chronos \citep{ansari2024chronos}, TimesFM \citep{das2024timesfm}) and newer architectures (N-HiTS, iTransformer) were not run in our offline compute environment and remain natural extensions; (iv) \textbf{holiday sample size:} only four multi-day Eid cycles occur in the test set and carry $\pm 1$-day lunar-sighting uncertainty; and (v) \textbf{target and benchmark constraints:} generation-end demand includes estimated load shedding, and BPDB does not archive an official evening-peak forecast.
 
 % =========================================================================
 % 6. CONCLUSION
 % =========================================================================
 \section{Conclusion}
-We presented a transparent, reproducible multi-seed benchmark of 21 statistical, linear, tree-based, patched-Transformer, and recurrent architectures across 6.5 years of Bangladesh Power Development Board (BPDB) daily operational records, accompanied by quality-assured data auditing and adaptive conformal uncertainty quantification. Under train-only scaling, 14-day split embargoes, and separated early-stopping (\texttt{Val-ES}) and calibration (\texttt{Val-Cal}) partitions, \textbf{PatchTST-Ensemble (3$\times$)} achieved the lowest 2025--2026 blind-test error ($574.53 \pm 6.68$\,MW MAE, 4.37\% MAPE, 444.7\,MW above 15\,GW, 0.69\,ms CPU latency) and led at every training length on an unconfounded fixed-test learning curve (1.5--4.5 years). Simultaneously, \textbf{Ridge Regression} on the identical 118-channel window was highly competitive (599.09\,MW on Fold~3; first across the 3-fold rolling-origin CV mean at 567.79\,MW; first in Dhaka and Chattogram divisions), while differenced targeting ($\Delta y$) reduced XGBoost error by 183.2\,MW and Equal-Weight RNN averaging outperformed finite-sample SLSQP optimization. Finally, \textbf{Locally Normalized Adaptive Conformal Inference (LN-ACI)} eliminated the seasonal under-coverage of static split conformal intervals---raising 90\% empirical coverage from 67.5\% to 89.6\% (88.9\%--90.1\% across all seasons) and reducing the Winkler score by 20.3\%---providing a practical, sub-millisecond blueprint for developing-grid load forecasting and uncertainty-aware reserve planning.
+We benchmarked 24 statistical, linear, differenced-tree, MLP, channel-independent DLinear, patched-Transformer, and recurrent architectures alongside a 5-way conformal uncertainty ablation across 6.5 years of BPDB daily evening peak demand records. Formal 95\% Hansen MCS testing on the 2025--2026 blind test set identifies a statistically tied leading group---spanning \texttt{PatchTST-Ensemble (3$\times$)} ($584.2$\,MW MAE, $841.6$\,MW RMSE, $+7.8\%$ skill over weekday persistence), \texttt{PatchTST-Diff}, \texttt{Ridge} ($602.3$\,MW, $6.40$\,KiB), and \texttt{Equal-Weight RNN} ($603.2$\,MW, $845.2$\,MW RMSE)---whereas 3-fold rolling-origin CV (2023--2026) favors \texttt{Weekday-Adjusted Persistence} ($551.0$\,MW) and \texttt{Ridge-Diff} ($562.8$\,MW), Holiday/Eid days favor \texttt{Ridge} ($867.9$\,MW), divisional grids favor \texttt{Equal-Weight RNN} and \texttt{Ridge}, and horizons past one week require a \texttt{Climatology+Ridge-Residual} hybrid to prevent drift. On untouched calibration residuals of both \texttt{PatchTST-3$\times$} and \texttt{Ridge}, \texttt{Plain ACI} minimizes proper Winkler score ($-25.3\%$ vs. static) while \texttt{LN-ACI} achieves the tightest seasonal coverage uniformity ($88.1\%$--$90.1\%$). Together, these results support a pragmatic multi-model operational workflow---pairing \texttt{Ridge} (for crisis, holiday, and linear sanity checks) with \texttt{PatchTST-3$\times$} (national) or \texttt{Equal-Weight RNN} (divisional) and adaptive conformal bounds---rather than relying on any single deep architecture.
+
+% =========================================================================
+% APPENDIX A: DESCRIPTIVE GRID QUALITY DIAGNOSTICS
+% =========================================================================
+\appendix
+\section{Data-Quality Filtered Descriptive Grid Diagnostics}
+Fig.~\ref{fig:reliability} summarizes descriptive national transmission-loss and reported divisional balance statistics across November 2019--June 2026 for archive transparency. Excluding 16 physically impossible negative metering inversions ($<0$\,MW) and 3 extreme upper spikes exceeding $Q_3 + 3\times\text{IQR} = 1,168$\,MW (maximum 2,831\,MW), daily peak transmission loss ($y_t^{\text{gen}} - y_t^{\text{sub}}$) has a robust median of \textbf{510.0\,MW} (IQR 188.0\,MW; robust mean 508.3\,MW; raw uncleaned mean 505.0\,MW). Panel~(b) plots mean reported divisional supply minus demand across all eight administrative divisions (ranging from $-38.2$\,MW in Mymensingh and $-25.5$\,MW in Dhaka to $-1.5$\,MW in Barishal); because BPDB's daily archive does not publish feeder-level thermal limits, these figures are reported strictly as descriptive historical shortfalls rather than transmission-capacity diagnostics.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{fig10_grid_reliability.pdf}
+    \caption{Appendix~A descriptive BPDB diagnostics (2019--2026): (a) robust QA-filtered daily peak transmission loss (16 negative and 3 upper IQR outliers excluded; median 510.0\,MW, mean 508.3\,MW) and (b) reported mean divisional supply minus demand.}
+    \label{fig:reliability}
+\end{figure*}
+
+\FloatBarrier
 
 \section*{CRediT authorship contribution statement}
 \textbf{Mubtasim Fuad:} Conceptualization, Methodology, Software, Formal analysis, Data curation, Writing -- original draft, Visualization. \textbf{Tanvir Anjum Abid:} Software, Validation, Investigation, Writing -- review \& editing. \textbf{Payel Das:} Data curation, Validation, Visualization, Writing -- review \& editing. \textbf{Md. Imam Hossain Rakib:} Software, Validation, Investigation. \textbf{Mohammad Rashedur Rahman:} Supervision, Conceptualization, Writing -- review \& editing, Resources, Project administration.
 
 \section*{Declaration of competing interest}
-The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. For full transparency, the corresponding author (M. R. Rahman) is also a co-author of \citet{yeaser2025bangladesh}, which investigated earlier recurrent models on BPDB demand data.
 
 \section*{Acknowledgment}
 The authors acknowledge the Bangladesh Power Development Board (BPDB) for archiving daily operational generation reports and the Department of Electrical and Computer Engineering, North South University, for research support.
 
 \section*{Data availability}
-Operational generation records are publicly archived by BPDB at \url{https://misc.bpdb.gov.bd/daily-generation}. All data-cleaning scripts, 21-model 5-seed benchmarks, rolling-origin CV and fixed-test learning curves, LN-ACI calibration, direct permutation importance, and figure generators are openly released at \url{https://github.com/mubtasimfuad7/Bangladesh-Peak-Demand-Forecasting}.
+Operational generation records are publicly archived by BPDB at \url{https://misc.bpdb.gov.bd/daily-generation}. All data-auditing scripts, 24-model 5-seed benchmarks, MCS and HLN-DM tests, 5-way conformal ablations, rolling-origin CV, multi-horizon hybrids, and figure generators are openly released at \url{https://github.com/mubtasimfuad7/Bangladesh-Peak-Demand-Forecasting}.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{references}

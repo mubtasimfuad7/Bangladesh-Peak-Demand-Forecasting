@@ -1,15 +1,19 @@
-,Params,Size_KB,CPU_ms
-SARIMAX,8.0,0.06,0.58
-Ridge (14xF),1653.0,12.9,0.04
-XGBoost (Level),0.0,0.0,0.07
-XGBoost-Diff (Δy),0.0,0.0,0.07
-LightGBM,0.0,0.0,0.21
-DLinear,3306.0,12.9,0.07
-PatchTST,122305.0,477.8,0.23
-BiGRU,300289.0,1173.0,0.37
-BiLSTM,323841.0,1265.0,0.36
-BiLSTM-Attention,168787.0,659.3,0.47
-Transformer,189505.0,740.3,0.26
-CNN-BiGRU-Transformer,42913.0,167.6,0.46
-PatchTST-Ensemble (3x),366915.0,1433.4,0.69
-Val-Opt RNN Ensemble,792917.0,3097.3,1.2
+,Params,Size_KiB,CPU_ms
+SARIMAX,8.0,0.031,0.37
+Ridge (14xF),1639.0,6.4,0.05
+Ridge-Diff (Δy),1639.0,6.4,0.05
+XGBoost (Level),0.0,0.0,0.06
+XGBoost-Diff (Δy),0.0,0.0,0.06
+LightGBM,0.0,0.0,0.22
+DLinear (CI),30.0,0.12,0.06
+MLP (14xF),218113.0,852.0,0.04
+PatchTST,122049.0,476.75,0.35
+BiGRU,299905.0,1171.5,0.36
+BiLSTM,323329.0,1263.0,0.38
+BiLSTM-Attention,168019.0,656.32,0.48
+Transformer,189441.0,740.0,0.26
+CNN-BiGRU-Transformer,42817.0,167.25,0.96
+PatchTST-Ensemble (3x),366147.0,1430.26,1.05
+"PatchTST-Diff (Δy, 3x)",366147.0,1430.26,1.05
+Equal-Weight RNN Ens,791253.0,3090.83,1.22
+Val-Opt RNN Ensemble,791253.0,3090.83,1.22

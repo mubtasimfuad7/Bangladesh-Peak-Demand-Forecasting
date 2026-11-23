@@ -1,7 +1,7 @@
 Highlights (Elsevier Submission — <= 85 characters per bullet):
 
-- Benchmarks 21 models over 5 seeds on 6.5 yr of BPDB peak demand records.
-- PatchTST-3x leads 2025-26 test (574.5 MW); Ridge leads 3-fold CV (567.8 MW).
-- Fixed-test learning curves unconfound history length from 2023 crisis shift.
-- Locally normalized ACI lifts 90% coverage from 67.5% to 89.6% (-20.3% Winkler).
-- Same-split 8-division, causal 1-30d horizons, and QA grid diagnostics reported.
+- Benchmarks 24 models over 5 seeds on 6.5 yr of BPDB peak electricity records.
+- PatchTST-3x, Ridge, and Eq-Wt RNN form a tied 95% MCS leading group on 2025-26.
+- Weekday persistence and Ridge-Diff lead 3-fold CV (551-563 MW) across 2023-26.
+- 5-way conformal ablation: Plain ACI cuts Winkler -25%; LN-ACI hits 88-90% PICP.
+- Climatology+Ridge hybrid prevents multi-horizon degradation beyond 7-14 days.

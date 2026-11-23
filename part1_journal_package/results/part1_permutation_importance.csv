@@ -1,7 +1,6 @@
 Feature_Group,Num_Features,Delta_MAE_Mean_MW,Delta_MAE_Std_MW
-Divisional Demand & Supply Telemetry,27,943.5546036784186,58.42405367045603
-Lagged National Peak & Rolling Stats,16,337.93700154194113,21.78439858619885
-Day-of-Week & Seasonality (Month/Year),8,148.10776515623007,15.074616152348419
-Holiday & Eid Lead/Lag Calendar Flags,52,21.384094555888208,3.7157051982061415
-Ambient Temperature & Subtropical CDD (26°C),11,8.726804069192507,1.5520065051583765
-Generation Constraints & Plant Maintenance,4,-3.9880204304135685,5.651736251486586
+Autoregressive Load History (National + Divisional),43,1544.8335774739583,73.91294410329037
+Day-of-Week & Monthly Seasonality,7,151.73501790364583,13.089179644355927
+Holiday & Eid Lead/Lag Flags,52,26.6746826171875,6.4628128117395764
+Ambient Temperature & Detrended CDD (25°C),11,11.756514485677084,3.8855030952268894
+Generation Constraints & Plant Maintenance,4,3.0699503580729166,5.228954942782036

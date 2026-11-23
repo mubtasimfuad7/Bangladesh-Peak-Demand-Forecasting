@@ -1,9 +1,23 @@
 {
   "n_clean": 2380,
-  "n_features": 118,
-  "tau_star_C": 26.0,
-  "tau_slope_MW_per_C": 470.9,
+  "n_features": 117,
+  "year_dropped": true,
+  "tau_star_C": 25.0,
+  "tau_slope_detrended_MW_per_C": 387.23,
+  "secular_trend_MW_per_yr": 780.8,
   "ridge_alpha": 10.0,
+  "ridge_diff_alpha": 10.0,
+  "tuned_neural_lrs": {
+    "DLinear (CI)": 0.005,
+    "MLP (14xF)": 0.001,
+    "PatchTST": 0.001,
+    "BiGRU": 0.0025,
+    "BiLSTM": 0.001,
+    "BiLSTM-Attention": 0.0025,
+    "Transformer": 0.0025,
+    "CNN-BiGRU-Transformer": 0.0025,
+    "PatchTST-Diff (3x)": 0.001
+  },
   "n_train": 1652,
   "n_val_total": 224,
   "n_val_es": 105,
@@ -16,135 +30,143 @@
     2024,
     999
   ],
-  "train_span": [
-    "2019-12-05",
-    "2024-07-07"
-  ],
-  "val_span": [
-    "2024-07-08",
-    "2025-03-08"
-  ],
-  "test_span": [
-    "2025-03-23",
-    "2026-06-30"
-  ],
+  "wkday_persist_mae": 633.43,
+  "pt3_s42_mae": 577.37,
+  "pt3_5seed_mae": 580.92,
   "learned_weights_per_seed": {
     "42": [
-      0.1422,
-      0.8578,
-      0.0
+      0.0394,
+      0.4614,
+      0.4992
     ],
     "123": [
-      0.0,
-      0.3614,
-      0.6386
+      0.6497,
+      0.3503,
+      0.0
     ],
     "7": [
-      0.0,
-      0.5858,
-      0.4142
+      0.62,
+      0.1857,
+      0.1943
     ],
     "2024": [
-      0.0402,
-      0.0,
-      0.9598
+      0.3605,
+      0.0981,
+      0.5414
     ],
     "999": [
-      0.0,
-      0.277,
-      0.723
+      0.0216,
+      0.2931,
+      0.6854
     ]
   },
   "learned_weights_mean": [
-    0.0365,
-    0.4164,
-    0.5471
+    0.3382,
+    0.2777,
+    0.3841
   ],
-  "ens_5seed_mae": 601.41,
-  "seed42_rnn_vs_pt3_dm": {
-    "dm_hln": 4.422,
-    "p_val": 0.0,
-    "d_mae": 56.8
-  },
   "data_qa": {
     "calendar_span_days": 2414,
     "raw_records": 2394,
     "missing_calendar_days": 20,
     "negative_loss_records": 16,
+    "upper_outlier_loss_records": 3,
+    "upper_iqr_cutoff_mw": 1168.0,
     "raw_mean_loss_mw": 504.99,
-    "qa_mean_loss_mw": 510.5,
-    "qa_max_loss_mw": 2831.0
+    "robust_mean_loss_mw": 508.31,
+    "robust_median_loss_mw": 510.0,
+    "robust_iqr_loss_mw": 188.0
   },
   "efficiency": {
     "SARIMAX": {
       "Params": 8,
-      "Size_KB": 0.06,
-      "CPU_ms": 0.58
+      "Size_KiB": 0.031,
+      "CPU_ms": 0.37
     },
     "Ridge (14xF)": {
-      "Params": 1653,
-      "Size_KB": 12.9,
-      "CPU_ms": 0.04
+      "Params": 1639,
+      "Size_KiB": 6.4,
+      "CPU_ms": 0.05
+    },
+    "Ridge-Diff (\u0394y)": {
+      "Params": 1639,
+      "Size_KiB": 6.4,
+      "CPU_ms": 0.05
     },
     "XGBoost (Level)": {
       "Params": 0,
-      "Size_KB": 0.0,
-      "CPU_ms": 0.07
+      "Size_KiB": 0.0,
+      "CPU_ms": 0.06
     },
     "XGBoost-Diff (\u0394y)": {
       "Params": 0,
-      "Size_KB": 0.0,
-      "CPU_ms": 0.07
+      "Size_KiB": 0.0,
+      "CPU_ms": 0.06
     },
     "LightGBM": {
       "Params": 0,
-      "Size_KB": 0.0,
-      "CPU_ms": 0.21
+      "Size_KiB": 0.0,
+      "CPU_ms": 0.22
     },
-    "DLinear": {
-      "Params": 3306,
-      "Size_KB": 12.9,
-      "CPU_ms": 0.07
+    "DLinear (CI)": {
+      "Params": 30,
+      "Size_KiB": 0.12,
+      "CPU_ms": 0.06
+    },
+    "MLP (14xF)": {
+      "Params": 218113,
+      "Size_KiB": 852.0,
+      "CPU_ms": 0.04
     },
     "PatchTST": {
-      "Params": 122305,
-      "Size_KB": 477.8,
-      "CPU_ms": 0.23
+      "Params": 122049,
+      "Size_KiB": 476.75,
+      "CPU_ms": 0.35
     },
     "BiGRU": {
-      "Params": 300289,
-      "Size_KB": 1173.0,
-      "CPU_ms": 0.37
-    },
-    "BiLSTM": {
-      "Params": 323841,
-      "Size_KB": 1265.0,
+      "Params": 299905,
+      "Size_KiB": 1171.5,
       "CPU_ms": 0.36
     },
+    "BiLSTM": {
+      "Params": 323329,
+      "Size_KiB": 1263.0,
+      "CPU_ms": 0.38
+    },
     "BiLSTM-Attention": {
-      "Params": 168787,
-      "Size_KB": 659.3,
-      "CPU_ms": 0.47
+      "Params": 168019,
+      "Size_KiB": 656.32,
+      "CPU_ms": 0.48
     },
     "Transformer": {
-      "Params": 189505,
-      "Size_KB": 740.3,
+      "Params": 189441,
+      "Size_KiB": 740.0,
       "CPU_ms": 0.26
     },
     "CNN-BiGRU-Transformer": {
-      "Params": 42913,
-      "Size_KB": 167.6,
-      "CPU_ms": 0.46
+      "Params": 42817,
+      "Size_KiB": 167.25,
+      "CPU_ms": 0.96
     },
     "PatchTST-Ensemble (3x)": {
-      "Params": 366915,
-      "Size_KB": 1433.4,
-      "CPU_ms": 0.69
+      "Params": 366147,
+      "Size_KiB": 1430.26,
+      "CPU_ms": 1.05
+    },
+    "PatchTST-Diff (\u0394y, 3x)": {
+      "Params": 366147,
+      "Size_KiB": 1430.26,
+      "CPU_ms": 1.05
+    },
+    "Equal-Weight RNN Ens": {
+      "Params": 791253,
+      "Size_KiB": 3090.83,
+      "CPU_ms": 1.22
     },
     "Val-Opt RNN Ensemble": {
-      "Params": 792917,
-      "Size_KB": 3097.3,
-      "CPU_ms": 1.2
+      "Params": 791253,
+      "Size_KiB": 3090.83,
+      "CPU_ms": 1.22
     }
   }
 }

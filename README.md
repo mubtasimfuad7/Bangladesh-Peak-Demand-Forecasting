@@ -1,26 +1,31 @@
 # Bangladesh Peak Electricity Demand Forecasting (Q1 Journal Benchmark)
 
-Reproducible multi-seed benchmark of **21 statistical, linear, tree-based, patched-Transformer, and recurrent architectures** with **Locally Normalized Adaptive Conformal Inference (LN-ACI)** on 6.5 years of daily operational records from the Bangladesh Power Development Board (BPDB, Nov 2019 – Jun 2026).
+Reproducible multi-seed benchmark of **24 statistical, linear, differenced-tree, MLP, channel-independent DLinear, patched-Transformer, and recurrent architectures** with a **5-way adaptive conformal prediction ablation** on 6.5 years of daily operational records from the Bangladesh Power Development Board (BPDB, Nov 2019 – Jun 2026).
 
 ## Headline Verified Findings
 
-- **2025–2026 Blind Test (462 days, 5 seeds, `Val-ES` / `Val-Cal` separated, train-only scaling, 14-day embargoes):**
-  - **PatchTST-Ensemble (3×):** `574.53 ± 6.68 MW` MAE (`4.37%` MAPE / `95.63%` Acc, `444.7 MW` on `>15 GW` peaks, `366,915` params, `0.69 ms` CPU).
-  - **Ridge Regression (`14 × 118` features, `α=10`):** `599.09 MW` MAE (`0.04 ms` CPU) — outperforming SARIMAX (`650.78 MW`), Equal-Weight RNN Ensemble (`607.08 ± 8.21 MW`), and Val-Opt SLSQP RNN Ensemble (`619.91 ± 17.60 MW`).
-  - **Differenced XGBoost (`Δy`):** `641.99 MW` MAE (`−183.2 MW` rescue vs. level-space XGBoost `825.17 MW`, cutting `>15 GW` error from `1,097.7` to `601.8 MW`).
-  - **Weekday-Adjusted Persistence:** `633.43 MW` MAE (`−122.3 MW` vs. raw Lag-1 Persistence `755.72 MW`).
-- **3-Fold Expanding-Window Rolling-Origin CV (2023–2026) & Unconfounded Fixed-Test Learning Curve:**
-  - **3-Fold Mean:** **Ridge (`567.79 MW`)** > SARIMAX (`598.32 MW`) > XGBoost-Diff (`609.63 MW`) > PatchTST-3× (`647.02 MW`) > Val-Opt RNN Ensemble (`652.86 MW`).
-  - **Fixed 2025–26 Test Learning Curve (`1.5–4.5 yr`):** SARIMAX plateaus near `651 MW`, whereas **PatchTST-3×** leads at every history length (`633.0 → 604.5 → 582.8 → 574.5 MW`).
-- **Adaptive Conformal Uncertainty (LN-ACI vs. Static Split Conformal):**
-  - Static Split Conformal under-covers seasonal volatility (`67.5%` at 90% nominal; `51.2%` in Summer).
-  - **LN-ACI** restores **`89.61%` empirical coverage** (`88.9%–90.1%` across all 4 seasons) and cuts the proper Winkler score by **`20.3%`** (`5,259 → 4,190 MW`).
-- **Same-Split 8-Division & Strictly Causal 1–30 Day Horizons:**
-  - Same-split 8-division RNN Ensemble beats Single BiGRU in `8/8` divisions and Ridge in `6/8` (Ridge leads Dhaka `251.7 MW` and Chattogram `74.2 MW`).
-  - Direct multi-horizon models beat Climatology + Trend through `h = 14` days (`1,039.8` vs. `1,070.8 MW`); at `h = 30` days without future weather, Climatology + Trend (`1,071.9 MW`) leads.
-- **Data Quality Audit & Direct Model Explainability:**
-  - Audited 20 missing BPDB calendar days (14 gaps, max 6 days in Jul 2024) and excluded 16 physically impossible negative transmission-loss metering inversions (QA mean peak line loss: `510.50 MW`).
-  - Direct group permutation importance on the deployed PyTorch ensemble quantifies true driver contributions (`Divisional Telemetry +943.6 MW`, `Lagged National Peak +337.9 MW`, `Day-of-Week/Season +148.1 MW`).
+- **Tied Leading Group inside the 95% Hansen Model Confidence Set (Mar 2025 – Jun 2026, 462 blind test days, 5 seeds, raw `Year` dropped, train-only scaling, separated `Val-ES` / `Val-Cal`, 14-day embargoes):**
+  - **PatchTST-Ensemble (3×)** (channel-mixing, no RevIN, `366,147` params, `1.40 MiB`, `1.05 ms` CPU): **`584.20 ± 10.71 MW` MAE**, **`841.60 ± 7.78 MW` RMSE**, `4.40%` MAPE, **`+7.8%` Skill vs. Weekday-Adjusted Persistence** (`p_MCS = 1.000` on MAE & RMSE).
+  - **PatchTST-Diff (`Δy`, 3×):** `589.61 ± 6.23 MW` MAE, `890.85 MW` RMSE (`+6.9%` skill).
+  - **Val-Opt RNN Ensemble:** `599.62 ± 13.50 MW` MAE, `846.25 MW` RMSE (`+5.3%` skill).
+  - **Ridge (`14 × 117`, `α = 10`):** `602.29 MW` MAE, `862.98 MW` RMSE (`+4.9%` skill, `1,639` params, `6.40 KiB` fp32, `0.05 ms` CPU).
+  - **Equal-Weight RNN Ens (`1/3` each):** `603.23 ± 6.66 MW` MAE, `845.23 MW` RMSE (`+4.8%` skill, half the cross-seed SD of SLSQP).
+  - **Ridge-Diff (`Δy`, `α = 10`):** `607.07 MW` MAE, `872.05 MW` RMSE (`+4.2%` skill).
+  - **HLN-DM (`Ref = PatchTST-3×`, Holm–Bonferroni):** Significantly beats `14/23` baselines on Seed 42 (`p_Holm ≤ 0.018`), while differences vs. `Ridge` (`p_Holm = 0.407 / 1.000`) and `Equal-Weight RNN` (`0.407 / 1.000`) are statistically non-significant.
+  - **Standard CI-DLinear, MLP & Differenced Trees:** Standard univariate `DLinear (CI)` (`30` params, `0.12 KiB`) reaches `698.29 ± 2.74 MW`; `MLP` (`218k` params) reaches `719.51 ± 71.21 MW`; `XGBoost-Diff (Δy)` cuts level-XGBoost error by **`21.5%` overall** (`819.35 → 642.90 MW`) and **`44.2%` on `>15 GW` peaks** (`1,084.8 → 605.8 MW`).
+- **3-Fold Expanding-Window Rolling-Origin CV (2023–2026) & Within-Period Sensitivity Curve:**
+  - **3-Fold Mean:** **Weekday-Adjusted Persistence (`551.01 MW`)** > **Ridge-Diff (`562.76 MW`)** > **Ridge (`565.54 MW`)** > SARIMAX (`599.35 MW`) > XGBoost-Diff (`609.93 MW`) > Equal-Weight RNN (`662.96 MW`) > PatchTST-3× (`696.05 MW`, due to Fold-1 2023 degradation `907.72 MW`).
+  - **Within-Period History Sensitivity (2025–26 fixed, `1.5–4.5 yr`):** SARIMAX plateaus near `651 MW`, whereas `PatchTST-3×` (`633.8 → 584.2 MW`), `Ridge` (`762.0 → 602.3 MW`), and `Equal-Weight RNN` (`739.6 → 603.2 MW`) improve monotonically.
+- **5-Way Conformal Uncertainty Ablation on Untouched `Val-Cal` Residuals (`PatchTST-3×` & `Ridge`):**
+  - Static Split Conformal fails under mild-to-hot shift (`70.8%` PICP at 90% nominal; `53.1%` in Summer; Winkler `4,869 MW`).
+  - **Plain ACI** minimizes proper Winkler score (**`3,636 MW`**, `−25.3%` vs. static; `88.1%` PICP, `2,404 MW` mean width; `3,702 MW` on Ridge).
+  - **LN-ACI** achieves the tightest seasonal coverage uniformity across all four seasons (**`88.1%–90.1%`**, lifting Summer PICP to **`90.1%`**; `89.4%` overall on `PatchTST-3×`, `89.6%` on `Ridge`, `2,878 MW` mean width).
+- **Regimes, Same-Split 8 Divisions, Multi-Horizon Hybrids & Direct Explainability:**
+  - **Holiday / Eid (`n = 41`):** **`Ridge` leads (`867.9 MW`)** ahead of `Equal-Weight RNN` (`892.6 MW`), `XGBoost-Diff` (`894.1 MW`), and `PatchTST-3×` (`926.7 MW`).
+  - **Same-Split 8-Division:** **`Equal-Weight RNN` beats `PatchTST-3×` in `8/8` divisions** and leads 5 regional grids, while `Ridge` / `Weekday Persistence` tie or edge ahead in Dhaka and Chattogram.
+  - **Causal Direct Multi-Horizon (`h = 1..30` days):** `PatchTST-3×` leads `h = 1, 3, 7` days; beyond one week, a **`Climatology+Ridge-Residual` hybrid** falls back gracefully to `Climatology+Trend` (`1,070.8 MW` at `h = 14`; `1,071.9 MW` at `h = 30`) instead of drifting.
+  - **Direct Merged-Block Permutation Importance (`PatchTST-3×`):** `Autoregressive Load History (k = 43): +1,544.8 MW`, `DOW/Month: +151.7 MW`, `Holiday/Eid: +26.7 MW`, `Temp & Detrended CDD_25: +11.8 MW` (detrended `τ* = 25.0 °C`, `+387.2 MW/°C`).
+  - **Robust Data QA (Appendix A):** Audited `20` missing calendar days, `16` negative metering inversions, and `3` upper IQR spikes `> 1,168 MW` (`robust_mean = 508.31 MW`, `median = 510.0 MW`, `IQR = 188.0 MW`).
 
 ## Reproducing All Experiments & Dashboard
 
