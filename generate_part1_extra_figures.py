@@ -134,9 +134,9 @@ def build_grid_reliability_figure(df_raw):
     ax.axhline(qa_loss.mean(), color="#1d3557", ls="--", lw=1.2, label=f"QA Mean: {qa_loss.mean():.2f} MW")
     ax.set_ylabel("Peak Transmission Loss (MW)")
     ax.set_ylim(0, qa_loss.max() * 1.12)
-    ax.set_title(f"(a) QA-Filtered Peak System Loss ({n_neg} Negative Records Excluded)", pad=24)
+    ax.set_title(f"(a) QA-Filtered Peak System Loss ({n_neg} Negative Records Excluded)", pad=28)
     ax.grid(alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.14), ncol=3, frameon=False, fontsize=7.4)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False, fontsize=7.3)
 
     ax = axes[1]
     divs = ["Dhaka", "Chattogram", "Rajshahi", "Khulna", "Mymensingh", "Rangpur", "Barishal", "Sylhet"]
@@ -146,7 +146,8 @@ def build_grid_reliability_figure(df_raw):
     ax.barh(s_def.index, s_def.values, color=c_def)
     ax.axvline(0, color="black", lw=0.9)
     for i, v in enumerate(s_def.values):
-        ax.text(v - 1.2 if v < 0 else v + 1.2, i, f"{v:.1f}", va="center",
+        lbl_v = f"{v - 1e-9:.1f}" if v < 0 else f"{v + 1e-9:.1f}"
+        ax.text(v - 1.2 if v < 0 else v + 1.2, i, lbl_v, va="center",
                 ha="right" if v < 0 else "left", fontsize=7.8)
     ax.set_xlim(min(-46, s_def.min() - 10), max(12, s_def.max() + 8))
     ax.set_xlabel("Mean Reported Balance: Supply − Demand (MW)")

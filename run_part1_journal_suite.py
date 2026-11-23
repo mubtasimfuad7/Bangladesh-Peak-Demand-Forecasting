@@ -1054,8 +1054,8 @@ if __name__ == "__main__":
     fig.savefig(f"{FIG_DIR}/fig1_forecast_comparison.pdf", bbox_inches="tight")
     plt.close(fig)
 
-    # Fig 2: Convergence curves (legend outside above plot — zero overlap!)
-    fig, ax = plt.subplots(figsize=(8.2, 4.4))
+    # Fig 2: Convergence curves (2-row legend cleanly separated from title)
+    fig, ax = plt.subplots(figsize=(8.4, 4.6))
     colors = {"BiGRU": "#1d3557", "BiLSTM-Attention": "#2a9d8f", "BiLSTM": "#d97706",
               "PatchTST": "#0284c7", "DLinear": "#6d597a", "Transformer": "#e76f51", "CNN-BiGRU-Transformer": "#9b2226"}
     for name, hlist in val_histories.items():
@@ -1067,9 +1067,9 @@ if __name__ == "__main__":
         ax.fill_between(ep, mu - sd, mu + sd, color=colors[name], alpha=0.11)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Val-ES Loss (Normalized MAE)")
-    ax.set_title("Multi-Seed Validation Convergence (Mean ± 1 SD across 5 Seeds)", pad=30)
+    ax.set_title("Multi-Seed Validation Convergence (Mean ± 1 SD across 5 Seeds)", pad=38)
     ax.grid(alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.16), ncol=4, frameon=False, fontsize=7.8)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=4, frameon=False, fontsize=7.8)
     fig.tight_layout()
     fig.savefig(f"{FIG_DIR}/fig2_convergence_curves.pdf", bbox_inches="tight")
     plt.close(fig)
@@ -1120,9 +1120,9 @@ if __name__ == "__main__":
     ax.set_xticklabels([s.split(" ")[0] for s in s_reg["Regime"]], fontsize=8.5)
     ax.set_ylabel("Blind Test MAE (MW)")
     ax.set_ylim(0, s_reg[["Persist_MAE", "XGBD_MAE", "PT3_MAE", "Ens_MAE"]].values.max() * 1.15)
-    ax.set_title("(b) Seasonal Regime Error Breakdown", pad=22)
+    ax.set_title("(b) Seasonal Regime Error Breakdown", pad=28)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.12), ncol=4, frameon=False, fontsize=7.5)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False, fontsize=7.4)
     fig.tight_layout()
     fig.savefig(f"{FIG_DIR}/fig4_ablation_regime.pdf", bbox_inches="tight")
     plt.close(fig)
@@ -1186,9 +1186,9 @@ if __name__ == "__main__":
     sizes_p = [130 if "Ensemble" in m else 70 for m in nn_names]
     axes[0].scatter(pts_x, pts_y, c=cols_p, s=sizes_p, zorder=4, edgecolors="white")
     offsets = {
-        "DLinear": (10, -8), "CNN-BiGRU-Transformer": (10, 6), "PatchTST": (10, -12),
-        "BiLSTM-Attention": (10, -12), "Transformer": (10, 4), "BiGRU": (10, 6),
-        "BiLSTM": (10, -12), "PatchTST-Ensemble (3x)": (10, -14), "Val-Opt RNN Ensemble": (-128, 8)
+        "DLinear": (10, -8), "CNN-BiGRU-Transformer": (10, 5), "PatchTST": (10, -2),
+        "BiLSTM-Attention": (-18, -14), "Transformer": (10, 4), "BiGRU": (-8, 10),
+        "BiLSTM": (10, -2), "PatchTST-Ensemble (3x)": (12, 2), "Val-Opt RNN Ensemble": (-124, 8)
     }
     for m, px, py in zip(nn_names, pts_x, pts_y):
         dx, dy = offsets.get(m, (8, 4))
@@ -1198,6 +1198,7 @@ if __name__ == "__main__":
     axes[0].set_ylabel("Blind Test MAE (MW)")
     axes[0].set_title("(a) Accuracy vs. Parameter Count (5-Seed)")
     axes[0].set_xlim(-30, 900)
+    axes[0].set_ylim(545, 905)
     axes[0].grid(alpha=0.25)
 
     lat_models = ["Ridge (14xF)", "XGBoost (Level)", "LightGBM", "DLinear", "PatchTST", "Transformer",
@@ -1221,8 +1222,9 @@ if __name__ == "__main__":
     ax.barh(df_p_plot["Feature_Group"], df_p_plot["Delta_MAE_Mean_MW"],
             xerr=df_p_plot["Delta_MAE_Std_MW"], capsize=3, color="#1d3557", height=0.58)
     for i, (_, r) in enumerate(df_p_plot.iterrows()):
-        ax.text(r["Delta_MAE_Mean_MW"] + r["Delta_MAE_Std_MW"] + 18, i,
-                f"+{r['Delta_MAE_Mean_MW']:.1f} MW (k={int(r['Num_Features'])})",
+        x_txt = max(0.0, r["Delta_MAE_Mean_MW"]) + r["Delta_MAE_Std_MW"] + 18
+        ax.text(x_txt, i,
+                f"{r['Delta_MAE_Mean_MW']:+.1f} MW (k={int(r['Num_Features'])})",
                 va="center", fontsize=7.8)
     ax.set_xlabel("Increase in Deployed PyTorch Ensemble MAE upon Block Permutation (MW)")
     ax.set_title("Direct Group Permutation Importance on the Deployed Val-Opt RNN Ensemble (15 Repeats)")

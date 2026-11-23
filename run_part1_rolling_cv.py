@@ -405,9 +405,9 @@ if __name__ == "__main__":
     ax.set_xticklabels([f"{r['Fold']}\n(n={r['N_Test']})" for _, r in df_cv.iterrows()], fontsize=8.3)
     ax.set_ylabel("Blind Test MAE (MW)")
     ax.set_ylim(0, df_cv[["Persist_MAE", "SARIMAX_MAE", "Ridge_MAE", "XGBDiff_MAE", "PatchTST3_MAE", "Ens_MAE_mean"]].values.max() * 1.18)
-    ax.set_title("(a) 3-Fold Expanding-Window Rolling CV (2023–2026)", pad=28)
+    ax.set_title("(a) 3-Fold Expanding-Window Rolling CV (2023–2026)", pad=38)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=3, frameon=False, fontsize=7.5)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=False, fontsize=7.6)
 
     ax = axes[1]
     yrs_x = df_lc["Train_Years"].values
@@ -418,9 +418,9 @@ if __name__ == "__main__":
     ax.set_xticks(yrs_x)
     ax.set_xticklabels([f"{y:.1f} yr\n({n}d)" for y, n in zip(df_lc["Train_Years"], df_lc["N_Train_Windows"])], fontsize=8.2)
     ax.set_ylabel("Fixed 2025–26 Test MAE (MW)")
-    ax.set_title("(b) Fixed-Test Learning Curve (Unconfounded Data Volume)", pad=28)
+    ax.set_title("(b) Fixed-Test Learning Curve (Unconfounded Data Volume)", pad=38)
     ax.grid(alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False, fontsize=7.6)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.6)
 
     fig.tight_layout()
     fig.savefig(f"{FIG_DIR}/fig13_rolling_cv.pdf", bbox_inches="tight")

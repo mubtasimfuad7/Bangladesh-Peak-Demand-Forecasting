@@ -420,21 +420,22 @@ if __name__ == "__main__":
     ax.bar(x + w, df_div["BiGRU_MAPE"], yerr=df_div["BiGRU_MAPE_std"], capsize=2.5, width=w, color="#2a9d8f", label="Single BiGRU (3-Seed)")
     ax.bar(x + 2 * w, df_div["MAPE_mean"], yerr=df_div["MAPE_std"], capsize=2.5, width=w, color="#1d3557", label="Val-Opt RNN Ensemble (3-Seed)")
     for i, r in df_div.iterrows():
-        ax.text(i + 2 * w, r["MAPE_mean"] + r["MAPE_std"] + 0.16, f"{r['MAPE_mean']:.2f}%",
-                ha="center", fontsize=7.0, fontweight="bold", color="#1d3557")
+        y_top = max(r["MAPE_mean"] + r["MAPE_std"], r["BiGRU_MAPE"] + r["BiGRU_MAPE_std"]) + 0.30
+        ax.text(i + 2 * w, y_top, f"{r['MAPE_mean']:.2f}%",
+                ha="center", fontsize=6.7, fontweight="bold", color="#1d3557")
     ax.set_xticks(x)
     ax.set_xticklabels(df_div["Division"], rotation=15, ha="right")
     ax.set_ylabel("Blind Test MAPE (%)  [Lower is Better]")
-    ax.set_title("Same-Split 8-Division Peak Demand Benchmark (462 Blind Test Days, 3 Seeds)", pad=26)
+    ax.set_title("Same-Split 8-Division Peak Demand Benchmark (462 Blind Test Days, 3 Seeds)", pad=28)
     ax.set_ylim(0, df_div[["Persist_MAPE", "Lag7_MAPE", "Ridge_MAPE", "BiGRU_MAPE"]].values.max() * 1.18)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.13), ncol=5, frameon=False, fontsize=7.6)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=5, frameon=False, fontsize=7.6)
     fig.tight_layout()
     fig.savefig(f"{FIG_DIR}/fig5_divisional_benchmark.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # Fig 12: Strictly Causal Direct Multi-Horizon (with Climatology+Trend & Ridge; clean top legends!)
-    fig, axes = plt.subplots(1, 2, figsize=(11.4, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.4))
     h_vals = df_mh["Horizon_Days"].values
 
     axes[0].errorbar(h_vals, df_mh["Ens_MAE_mean"], yerr=df_mh["Ens_MAE_std"], marker="o", lw=2.0, capsize=4, color="#1d3557", label="Val-Opt RNN Ens")
@@ -444,9 +445,9 @@ if __name__ == "__main__":
     axes[0].set_xticks(h_vals)
     axes[0].set_xlabel("Direct Forecast Horizon h (Days Ahead)")
     axes[0].set_ylabel("Blind Test MAE (MW)")
-    axes[0].set_title("(a) Multi-Horizon MAE vs. Seasonal & Linear Baselines", pad=26)
+    axes[0].set_title("(a) Multi-Horizon MAE vs. Seasonal & Linear Baselines", pad=38)
     axes[0].grid(alpha=0.25)
-    axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False, fontsize=7.6)
+    axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.6)
 
     axes[1].plot(h_vals, df_mh["Ens_MAPE_mean"], marker="o", lw=2.0, color="#1d3557", label="Val-Opt RNN Ens MAPE (%)")
     axes[1].plot(h_vals, df_mh["Clim_Trend_MAPE"], marker="D", lw=1.6, ls=":", color="#6d597a", label="Climatology+Trend MAPE (%)")
@@ -454,9 +455,9 @@ if __name__ == "__main__":
     axes[1].set_xticks(h_vals)
     axes[1].set_xlabel("Direct Forecast Horizon h (Days Ahead)")
     axes[1].set_ylabel("Blind Test MAPE (%)")
-    axes[1].set_title("(b) Causal Multi-Horizon MAPE (Zero Future Telemetry)", pad=26)
+    axes[1].set_title("(b) Causal Multi-Horizon MAPE (Zero Future Telemetry)", pad=38)
     axes[1].grid(alpha=0.25)
-    axes[1].legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False, fontsize=7.6)
+    axes[1].legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.6)
 
     fig.tight_layout()
     fig.savefig(f"{FIG_DIR}/fig12_multihorizon.pdf", bbox_inches="tight")
