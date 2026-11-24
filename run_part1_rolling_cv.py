@@ -1,8 +1,7 @@
 """
-Round-2 3-Fold Expanding-Window Rolling-Origin CV (2023, 2024, 2025-26) +
-Within-Period Fixed-Test Sensitivity Learning Curve (1.5, 2.5, 3.5, 4.5 yr on fixed 2025-26 test).
-Uses detrended cooling threshold tau* = 25.0 C, drops extrapolating Year column, includes Ridge,
-Ridge-Diff, Weekday-Adj Persistence, SARIMAX, XGBoost-Diff, Equal-Weight RNN Ens, and PatchTST-3x.
+v4 3-Fold Expanding-Window Rolling-Origin CV (ALL 5 SEEDS UNIFORMLY ACROSS ALL 3 FOLDS!) +
+Fold-1 Non-Stationarity Controls (PatchTST-CM-Diff Delta-y AND faithful PatchTST-RevIN CI) +
+Within-Period Fixed-Test Sensitivity Curve (1.5, 2.5, 3.5, 4.5 yr on fixed 2025-26 test).
 """
 import json
 import math
@@ -20,7 +19,7 @@ import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 import xgboost as xgb
 
@@ -32,7 +31,7 @@ OUT_DIR = "part1_journal_package/results"
 os.makedirs(FIG_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
-SEEDS = [42, 123, 7]
+SEEDS = [42, 123, 7, 2024, 999]  # Uniform 5 seeds across ALL folds!
 HIST_SIZE = 14
 EPOCHS = 45
 BATCH_SIZE = 32
@@ -55,7 +54,7 @@ def windowing(X_input, y_input, history_size):
     return np.array(data, dtype=np.float32), np.array(labels, dtype=np.float32).reshape(-1, 1)
 
 
-class PatchTSTModel(nn.Module):
+class PatchTSTCMModel(nn.Module):
     def __init__(self, n_feat, seq_len=14, patch_len=4, stride=2, d_model=64):
         super().__init__()
         self.patch_len, self.stride = patch_len, stride
@@ -70,6 +69,30 @@ class PatchTSTModel(nn.Module):
     def forward(self, x):
         p = x.unfold(1, self.patch_len, self.stride).reshape(x.size(0), self.n_patches, -1)
         return self.head(self.encoder(self.patch_proj(p) + self.pos_emb))
+
+
+class PatchTSTRevINModel(nn.Module):
+    def __init__(self, seq_len=14, patch_len=4, stride=2, d_model=64, eps=1e-5):
+        super().__init__()
+        self.patch_len, self.stride, self.eps = patch_len, stride, eps
+        self.n_patches = (seq_len - patch_len) // stride + 1
+        self.revin_weight = nn.Parameter(torch.ones(1, 1))
+        self.revin_bias = nn.Parameter(torch.zeros(1, 1))
+        self.patch_proj = nn.Linear(patch_len, d_model)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.n_patches, d_model))
+        enc = nn.TransformerEncoderLayer(d_model=d_model, nhead=4, dim_feedforward=128,
+                                         dropout=OPT_DROPOUT, batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(enc, num_layers=2)
+        self.head = nn.Sequential(nn.Flatten(), nn.Dropout(OPT_DROPOUT),
+                                  nn.Linear(self.n_patches * d_model, 1))
+    def forward(self, x):
+        y_seq = x[:, :, -1]
+        mu = y_seq.mean(dim=1, keepdim=True)
+        sd = torch.sqrt(y_seq.var(dim=1, keepdim=True, unbiased=False) + self.eps)
+        y_norm = ((y_seq - mu) / sd) * self.revin_weight + self.revin_bias
+        patches = y_norm.unfold(dimension=1, size=self.patch_len, step=self.stride)
+        out_norm = self.head(self.encoder(self.patch_proj(patches) + self.pos_emb))
+        return ((out_norm - self.revin_bias) / (self.revin_weight + self.eps)) * sd + mu
 
 
 class BiGRUModel(nn.Module):
@@ -135,7 +158,7 @@ def predict_torch(model, X):
 
 def fit_ridge_val(X_tr_2d, y_tr, X_va_es_2d, y_va_es, X_te_2d, sy):
     best_mae, best_mod = float("inf"), None
-    for a in [0.1, 1.0, 10.0, 50.0, 100.0, 300.0, 1000.0]:
+    for a in [0.1, 1.0, 10.0, 50.0, 100.0, 300.0, 1000.0, 3000.0]:
         m = Ridge(alpha=a).fit(X_tr_2d, y_tr.ravel())
         mae = mean_absolute_error(y_va_es.ravel(), m.predict(X_va_es_2d))
         if mae < best_mae: best_mae, best_mod = mae, m
@@ -193,7 +216,6 @@ def eval_split_models(tr_df, va_df, te_df, meta, cont_cols, cat_oh, target_col, 
     y_te_inv = te_df[[target_col]].iloc[HIST_SIZE:].values
     y_pers = te_df[target_col].values[HIST_SIZE - 1 : -1].reshape(-1, 1)
 
-    # Weekday-Adjusted Persistence
     tr_m = meta.loc[tr_df.index]
     te_m = meta.loc[te_df.index]
     dow_means = tr_m.groupby("Day of the week")[target_col].mean().to_dict()
@@ -206,7 +228,6 @@ def eval_split_models(tr_df, va_df, te_df, meta, cont_cols, cat_oh, target_col, 
     X_te_2d = X_te.reshape(len(X_te), -1)
     nf = X_tr.shape[-1]
 
-    # SARIMAX
     ex_full = pd.DataFrame(index=meta.index)
     tl1 = meta[temp_col].shift(1).bfill()
     ex_full["CDD_l1"] = np.maximum(0.0, tl1 - TAU_COOL)
@@ -229,29 +250,43 @@ def eval_split_models(tr_df, va_df, te_df, meta, cont_cols, cat_oh, target_col, 
         "Ridge_MAE": round(float(mean_absolute_error(y_te_inv, p_ridge)), 2),
     }
 
+    dy_tr = (tr_df[target_col].values[HIST_SIZE:] - tr_df[target_col].values[HIST_SIZE - 1 : -1]).reshape(-1, 1)
+    dy_va_es = (va_df[target_col].values[HIST_SIZE : HIST_SIZE + len(X_va_es)] - va_df[target_col].values[HIST_SIZE - 1 : HIST_SIZE - 1 + len(X_va_es)]).reshape(-1, 1)
+    s_dy = StandardScaler().fit(dy_tr)
+    dy_tr_n = s_dy.transform(dy_tr).astype(np.float32)
+    dy_va_n = s_dy.transform(dy_va_es).astype(np.float32)
+
     if run_all:
-        dy_tr = tr_df[target_col].values[HIST_SIZE:] - tr_df[target_col].values[HIST_SIZE - 1 : -1]
-        dy_va_es = va_df[target_col].values[HIST_SIZE : HIST_SIZE + len(X_va_es)] - va_df[target_col].values[HIST_SIZE - 1 : HIST_SIZE - 1 + len(X_va_es)]
-        best_a, best_m, best_rd = 100.0, float("inf"), None
-        for a in [1.0, 10.0, 50.0, 100.0, 300.0, 1000.0]:
-            rd = Ridge(alpha=a).fit(X_tr_2d, dy_tr)
-            mae = mean_absolute_error(dy_va_es, rd.predict(X_va_es_2d))
-            if mae < best_m: best_m, best_a, best_rd = mae, a, rd
+        best_m, best_rd = float("inf"), None
+        for a in [0.1, 1.0, 10.0, 50.0, 100.0, 300.0, 1000.0, 3000.0]:
+            rd = Ridge(alpha=a).fit(X_tr_2d, dy_tr.ravel())
+            mae = mean_absolute_error(dy_va_es.ravel(), rd.predict(X_va_es_2d))
+            if mae < best_m: best_m, best_rd = mae, rd
         p_rd = y_pers + best_rd.predict(X_te_2d).reshape(-1, 1)
         out["RidgeDiff_MAE"] = round(float(mean_absolute_error(y_te_inv, p_rd)), 2)
 
         xmd = xgb.XGBRegressor(random_state=42, early_stopping_rounds=8, eval_metric="mae", n_jobs=1)
-        xmd.fit(X_tr_2d, dy_tr, eval_set=[(X_va_es_2d, dy_va_es)], verbose=False)
+        xmd.fit(X_tr_2d, dy_tr.ravel(), eval_set=[(X_va_es_2d, dy_va_es.ravel())], verbose=False)
         p_xgbd = y_pers + xmd.predict(X_te_2d).reshape(-1, 1)
         out["XGBDiff_MAE"] = round(float(mean_absolute_error(y_te_inv, p_xgbd)), 2)
 
-    eq_maes, pt3_maes = [], []
+    eq_maes, pt3_maes, ptd_maes, rev_maes = [], [], [], []
     for s in SEEDS:
         pt_preds = []
         for off in [0, 1000, 2000]:
-            m_pt = train_torch_model(PatchTSTModel(nf), X_tr, y_tr, X_va_es, y_va_es, s + off, lr=lrs.get("PatchTST", 1e-3))
+            m_pt = train_torch_model(PatchTSTCMModel(nf), X_tr, y_tr, X_va_es, y_va_es, s + off, lr=lrs.get("PatchTST-CM (Single)", 1e-3))
             pt_preds.append(sy.inverse_transform(predict_torch(m_pt, X_te)))
         pt3_maes.append(mean_absolute_error(y_te_inv, np.mean(pt_preds, axis=0)))
+
+        if run_all:
+            ptd_preds, rev_preds = [], []
+            for off in [0, 1000, 2000]:
+                m_pd = train_torch_model(PatchTSTCMModel(nf), X_tr, dy_tr_n, X_va_es, dy_va_n, s + off, lr=lrs.get("PatchTST-CM-Diff (3x)", 1e-3))
+                ptd_preds.append(y_pers + s_dy.inverse_transform(predict_torch(m_pd, X_te)))
+                m_rv = train_torch_model(PatchTSTRevINModel(HIST_SIZE), X_tr, y_tr, X_va_es, y_va_es, s + off, lr=lrs.get("PatchTST-RevIN (Single)", 1e-3))
+                rev_preds.append(sy.inverse_transform(predict_torch(m_rv, X_te)))
+            ptd_maes.append(mean_absolute_error(y_te_inv, np.mean(ptd_preds, axis=0)))
+            rev_maes.append(mean_absolute_error(y_te_inv, np.mean(rev_preds, axis=0)))
 
         t_l = []
         for nm, fn in [("BiGRU", lambda: BiGRUModel(nf)), ("BiLSTM-Attention", lambda: BiLSTMAttnModel(nf)), ("BiLSTM", lambda: BiLSTMModel(nf))]:
@@ -265,6 +300,13 @@ def eval_split_models(tr_df, va_df, te_df, meta, cont_cols, cat_oh, target_col, 
         "EqRNN_MAE": round(float(np.mean(eq_maes)), 2),
         "EqRNN_std": round(float(np.std(eq_maes, ddof=1)), 2),
     })
+    if run_all:
+        out.update({
+            "PatchTSTDiff_MAE": round(float(np.mean(ptd_maes)), 2),
+            "PatchTSTDiff_std": round(float(np.std(ptd_maes, ddof=1)), 2),
+            "PatchTSTRevIN_MAE": round(float(np.mean(rev_maes)), 2),
+            "PatchTSTRevIN_std": round(float(np.std(rev_maes, ddof=1)), 2),
+        })
     return out
 
 
@@ -273,7 +315,7 @@ if __name__ == "__main__":
     df_enc, meta, cont_cols, cat_oh, target_col, temp_col = load_full_features()
     lrs = json.load(open(f"{OUT_DIR}/part1_meta.json"))["tuned_neural_lrs"] if os.path.exists(f"{OUT_DIR}/part1_meta.json") else {}
 
-    print("=== PART A: 3-FOLD EXPANDING-WINDOW ROLLING-ORIGIN CV ===", flush=True)
+    print("=== PART A: 3-FOLD EXPANDING-WINDOW ROLLING CV (ALL 5 SEEDS + DIFF/REVIN CONTROLS) ===", flush=True)
     folds = [
         ("Fold 1 (2023)", "2022-07-01", "2023-01-01", "2023-12-31"),
         ("Fold 2 (2024)", "2023-07-01", "2024-01-01", "2024-12-31"),
@@ -291,13 +333,17 @@ if __name__ == "__main__":
                 "Ridge_MAE": round(float(s5.loc["Ridge (14xF)", "MAE_mean"]), 2),
                 "RidgeDiff_MAE": round(float(s5.loc["Ridge-Diff (Δy)", "MAE_mean"]), 2),
                 "XGBDiff_MAE": round(float(s5.loc["XGBoost-Diff (Δy)", "MAE_mean"]), 2),
-                "PatchTST3_MAE": round(float(s5.loc["PatchTST-Ensemble (3x)", "MAE_mean"]), 2),
-                "PatchTST3_std": round(float(s5.loc["PatchTST-Ensemble (3x)", "MAE_std"]), 2),
+                "PatchTST3_MAE": round(float(s5.loc["PatchTST-CM (3x)", "MAE_mean"]), 2),
+                "PatchTST3_std": round(float(s5.loc["PatchTST-CM (3x)", "MAE_std"]), 2),
+                "PatchTSTDiff_MAE": round(float(s5.loc["PatchTST-CM-Diff (Δy, 3x)", "MAE_mean"]), 2),
+                "PatchTSTDiff_std": round(float(s5.loc["PatchTST-CM-Diff (Δy, 3x)", "MAE_std"]), 2),
+                "PatchTSTRevIN_MAE": round(float(s5.loc["PatchTST-RevIN (CI, 3x)", "MAE_mean"]), 2),
+                "PatchTSTRevIN_std": round(float(s5.loc["PatchTST-RevIN (CI, 3x)", "MAE_std"]), 2),
                 "EqRNN_MAE": round(float(s5.loc["Equal-Weight RNN Ens", "MAE_mean"]), 2),
                 "EqRNN_std": round(float(s5.loc["Equal-Weight RNN Ens", "MAE_std"]), 2),
             }
             rows.append(row)
-            print(f"  {fname:16s} (synced 5-seed): Ridge={row['Ridge_MAE']:.1f} | SARIMAX={row['SARIMAX_MAE']:.1f} | PT3={row['PatchTST3_MAE']:.1f} | EqRNN={row['EqRNN_MAE']:.1f}", flush=True)
+            print(f"  {fname:16s} (5-seed synced): Wkday={row['Wkday_MAE']:.1f} | RidgeDiff={row['RidgeDiff_MAE']:.1f} | PT-CM={row['PatchTST3_MAE']:.1f} | PT-Diff={row['PatchTSTDiff_MAE']:.1f} | PT-RevIN={row['PatchTSTRevIN_MAE']:.1f}", flush=True)
             continue
 
         tr_df = df_enc.loc[: pd.Timestamp(val_start) - pd.Timedelta(days=1)]
@@ -305,16 +351,16 @@ if __name__ == "__main__":
         te_df = df_enc.loc[test_start : test_end]
         row = {"Fold": fname, **eval_split_models(tr_df, va_df, te_df, meta, cont_cols, cat_oh, target_col, temp_col, lrs, True)}
         rows.append(row)
-        print(f"  {fname:16s} (N_te={row['N_Test']}): Ridge={row['Ridge_MAE']:.1f} | SARIMAX={row['SARIMAX_MAE']:.1f} | PT3={row['PatchTST3_MAE']:.1f} | EqRNN={row['EqRNN_MAE']:.1f} | Wkday={row['Wkday_MAE']:.1f}", flush=True)
+        print(f"  {fname:16s} (5-seed, N_te={row['N_Test']}): Wkday={row['Wkday_MAE']:.1f} | RidgeDiff={row['RidgeDiff_MAE']:.1f} | PT-CM={row['PatchTST3_MAE']:.1f}±{row['PatchTST3_std']:.1f} | PT-Diff={row['PatchTSTDiff_MAE']:.1f} | PT-RevIN={row['PatchTSTRevIN_MAE']:.1f}", flush=True)
 
     df_cv = pd.DataFrame(rows)
     df_cv.to_csv(f"{OUT_DIR}/part1_rolling_cv.csv", index=False)
-    print("\n=== 3-FOLD ROLLING CV SUMMARY ===")
+    print("\n=== 3-FOLD ROLLING CV SUMMARY (5 SEEDS UNIFORM) ===")
     print(df_cv.to_string(index=False))
-    for col in ["Persist_MAE", "Wkday_MAE", "SARIMAX_MAE", "Ridge_MAE", "RidgeDiff_MAE", "XGBDiff_MAE", "PatchTST3_MAE", "EqRNN_MAE"]:
-        print(f"  3-Fold Mean {col:15s}: {df_cv[col].mean():.2f} MW")
+    for col in ["Persist_MAE", "Wkday_MAE", "SARIMAX_MAE", "Ridge_MAE", "RidgeDiff_MAE", "XGBDiff_MAE", "PatchTST3_MAE", "PatchTSTDiff_MAE", "PatchTSTRevIN_MAE", "EqRNN_MAE"]:
+        print(f"  3-Fold Mean {col:18s}: {df_cv[col].mean():.2f} MW")
 
-    print("\n=== PART B: WITHIN-PERIOD FIXED-TEST SENSITIVITY CURVE (2025-26 TEST FIXED) ===", flush=True)
+    print("\n=== PART B: WITHIN-PERIOD SENSITIVITY TO TRAILING HISTORY (5 SEEDS, 2025-26 FIXED) ===", flush=True)
     tc_full, vc_full = int(0.70 * len(df_enc)), int(0.80 * len(df_enc))
     va_fixed, te_fixed, tr_full = df_enc.iloc[tc_full:vc_full], df_enc.iloc[vc_full:], df_enc.iloc[:tc_full]
     lc_rows = []
@@ -325,8 +371,8 @@ if __name__ == "__main__":
                 "Train_Years": yrs, "N_Train_Windows": len(tr_full) - HIST_SIZE,
                 "SARIMAX_MAE": round(float(s5.loc["SARIMAX", "MAE_mean"]), 2),
                 "Ridge_MAE": round(float(s5.loc["Ridge (14xF)", "MAE_mean"]), 2),
-                "PatchTST3_MAE": round(float(s5.loc["PatchTST-Ensemble (3x)", "MAE_mean"]), 2),
-                "PatchTST3_std": round(float(s5.loc["PatchTST-Ensemble (3x)", "MAE_std"]), 2),
+                "PatchTST3_MAE": round(float(s5.loc["PatchTST-CM (3x)", "MAE_mean"]), 2),
+                "PatchTST3_std": round(float(s5.loc["PatchTST-CM (3x)", "MAE_std"]), 2),
                 "EqRNN_MAE": round(float(s5.loc["Equal-Weight RNN Ens", "MAE_mean"]), 2),
                 "EqRNN_std": round(float(s5.loc["Equal-Weight RNN Ens", "MAE_std"]), 2),
             }
@@ -339,39 +385,42 @@ if __name__ == "__main__":
                 "EqRNN_MAE": res["EqRNN_MAE"], "EqRNN_std": res["EqRNN_std"],
             }
         lc_rows.append(r_lc)
-        print(f"  Train={yrs:.1f} yr ({r_lc['N_Train_Windows']:4d} win) | SARIMAX={r_lc['SARIMAX_MAE']:.1f} | Ridge={r_lc['Ridge_MAE']:.1f} | PT3={r_lc['PatchTST3_MAE']:.1f}±{r_lc['PatchTST3_std']:.1f} | EqRNN={r_lc['EqRNN_MAE']:.1f}±{r_lc['EqRNN_std']:.1f}", flush=True)
+        print(f"  Train={yrs:.1f} yr ({r_lc['N_Train_Windows']:4d} win) | SARIMAX={r_lc['SARIMAX_MAE']:.1f} | Ridge={r_lc['Ridge_MAE']:.1f} | PT-CM={r_lc['PatchTST3_MAE']:.1f}±{r_lc['PatchTST3_std']:.1f} | EqRNN={r_lc['EqRNN_MAE']:.1f}±{r_lc['EqRNN_std']:.1f}", flush=True)
 
     df_lc = pd.DataFrame(lc_rows)
     df_lc.to_csv(f"{OUT_DIR}/part1_learning_curve.csv", index=False)
 
     plt.rcParams.update({"font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9})
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.7))
+    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.7))
 
-    ax = axes[0]; x = np.arange(len(df_cv)); w = 0.13
+    ax = axes[0]; x = np.arange(len(df_cv)); w = 0.12
     series = [
         ("Wkday_MAE", "Wkday Persist", "#94a3b8"),
-        ("SARIMAX_MAE", "SARIMAX", "#6d597a"),
-        ("Ridge_MAE", "Ridge (14×F)", "#d97706"),
-        ("XGBDiff_MAE", "XGBoost-Diff", "#f4a261"),
+        ("RidgeDiff_MAE", "Ridge-Diff (Δy)", "#d97706"),
+        ("PatchTSTDiff_MAE", "PT-CM-Diff (Δy)", "#2563eb"),
+        ("PatchTSTRevIN_MAE", "PT-RevIN (CI)", "#14b8a6"),
         ("EqRNN_MAE", "Eq-Wt RNN Ens", "#1d3557"),
-        ("PatchTST3_MAE", "PatchTST-3×", "#0d9488"),
+        ("PatchTST3_MAE", "PT-CM (Level)", "#dc2626"),
     ]
     for idx, (col, lbl, colr) in enumerate(series):
         offset = (idx - 2.5) * w
-        yerr = df_cv["EqRNN_std"] if col == "EqRNN_MAE" else (df_cv["PatchTST3_std"] if col == "PatchTST3_MAE" else None)
-        ax.bar(x + offset, df_cv[col], yerr=yerr, capsize=2.5, width=w, color=colr, label=lbl)
+        yerr = (df_cv["EqRNN_std"] if col == "EqRNN_MAE" else
+                df_cv["PatchTST3_std"] if col == "PatchTST3_MAE" else
+                df_cv["PatchTSTDiff_std"] if col == "PatchTSTDiff_MAE" else
+                df_cv["PatchTSTRevIN_std"] if col == "PatchTSTRevIN_MAE" else None)
+        ax.bar(x + offset, df_cv[col], yerr=yerr, capsize=2.2, width=w, color=colr, label=lbl)
     ax.set_xticks(x); ax.set_xticklabels([f"{r['Fold']}\n(n={r['N_Test']})" for _, r in df_cv.iterrows()], fontsize=8.3)
     ax.set_ylabel("Blind Test MAE (MW)")
-    ax.set_ylim(0, df_cv[["Wkday_MAE", "SARIMAX_MAE", "Ridge_MAE", "XGBDiff_MAE", "EqRNN_MAE", "PatchTST3_MAE"]].values.max() * 1.18)
-    ax.set_title("(a) 3-Fold Expanding-Window Rolling CV (2023–2026)", pad=38)
+    ax.set_ylim(0, df_cv[["Wkday_MAE", "RidgeDiff_MAE", "PatchTSTDiff_MAE", "PatchTSTRevIN_MAE", "EqRNN_MAE", "PatchTST3_MAE"]].values.max() * 1.18)
+    ax.set_title("(a) 3-Fold Rolling CV (5 Seeds; Level vs. Δy & RevIN Controls)", pad=38)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=False, fontsize=7.6)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=False, fontsize=7.5)
 
     ax = axes[1]; yrs_x = df_lc["Train_Years"].values
     ax.plot(yrs_x, df_lc["SARIMAX_MAE"], marker="s", lw=1.8, ls="--", color="#6d597a", label="SARIMAX")
     ax.plot(yrs_x, df_lc["Ridge_MAE"], marker="^", lw=1.8, ls=":", color="#d97706", label="Ridge (14×F)")
     ax.errorbar(yrs_x, df_lc["EqRNN_MAE"], yerr=df_lc["EqRNN_std"], marker="o", lw=1.9, capsize=3.5, color="#1d3557", label="Eq-Wt RNN Ens")
-    ax.errorbar(yrs_x, df_lc["PatchTST3_MAE"], yerr=df_lc["PatchTST3_std"], marker="D", lw=2.1, capsize=3.5, color="#0d9488", label="PatchTST-3×")
+    ax.errorbar(yrs_x, df_lc["PatchTST3_MAE"], yerr=df_lc["PatchTST3_std"], marker="D", lw=2.1, capsize=3.5, color="#0d9488", label="PatchTST-CM (3×)")
     ax.set_xticks(yrs_x)
     ax.set_xticklabels([f"{y:.1f} yr\n({n}d)" for y, n in zip(df_lc["Train_Years"], df_lc["N_Train_Windows"])], fontsize=8.2)
     ax.set_ylabel("Fixed 2025–26 Test MAE (MW)")
@@ -380,4 +429,4 @@ if __name__ == "__main__":
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.6)
 
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig13_rolling_cv.pdf", bbox_inches="tight"); plt.close(fig)
-    print(f"Saved Round-2 rolling CV & learning curve in {time.perf_counter() - t0:.1f}s!", flush=True)
+    print(f"Saved v4 rolling CV & learning curve in {time.perf_counter() - t0:.1f}s!", flush=True)

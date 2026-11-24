@@ -1,33 +1,27 @@
 """
-Part 1 Q1-Journal Reproducible Benchmark Suite (Round-2 Revision — Addressing All 17 Reviewer Items).
-Key upgrades:
-  1. Drops raw extrapolating `Year` column; estimates cooling threshold tau* = 25.0 C on LINEARLY DETRENDED
-     training demand (unconfounded by 780.8 MW/yr secular growth); applies robust IQR transmission-loss QA.
-  2. Equalized 24-model 5-seed benchmark (seeds 42, 123, 7, 2024, 999):
-     - Naive: Persistence (Lag-1), Weekday-Adj Persistence, Seasonal Naive (Lag-7), 7-Day Rolling Mean
-     - Statistical & Linear: SARIMAX(1,1,1)(1,0,1,7), Ridge (14xF), Ridge-Diff (Delta-y)
-     - GBDTs: XGBoost (Level), XGBoost-Diff (Delta-y), LightGBM
-     - Standard & Tabular Neural: Standard Channel-Independent DLinear (Zeng et al. 2023, 30 params),
-       2-Layer MLP (14xF), PatchTST (Single, channel-mixing, no RevIN), PatchTST-Ensemble (3x),
-       PatchTST-Diff (Delta-y, 3x)
-     - Deep Recurrent/Attention/Hybrid: BiGRU, BiLSTM, BiLSTM-Attention, Transformer, CNN-BiGRU-Transformer,
-       Hybrid BiGRU-XGBoost, Hybrid BiLSTM-Attn-XGBoost, Equal-Weight RNN Ens, Val-Opt RNN Ensemble
-     - Matched Val-ES learning-rate selection {1e-3, 2.5e-3} per neural family on Seed 42.
-  3. Primary Metrics: MAE (MW), RMSE (MW), MAPE (%), Skill Score vs Weekday-Adj Persistence (%), R^2.
-  4. Significance & Model Confidence Set (MCS):
-     - PatchTST-Ensemble (3x) as reference in HLN-DM + Holm-Bonferroni on BOTH matched single-run (Seed 42)
-       and 5-seed ensemble averages.
-     - Formal 95% Hansen Model Confidence Set (MCS) via moving-block bootstrap on both MAE and RMSE.
-  5. 5-Way Conformal Prediction Ablation on UNTOUCHED Val-Cal residuals of BOTH PatchTST-3x and Ridge:
-     Static Split vs Rolling-Window (120d) vs Locally Normalized Static vs Plain ACI vs LN-ACI
-     (safe alpha_t in [0.02, 0.50] over 120 scores), plus full Seasonal Coverage & Width table.
-  6. Direct Group Permutation Importance on PatchTST-3x with MERGED Autoregressive Load History block.
-  7. Validation-first 5-seed Feature & PCA Ablation on PatchTST-3x and Ridge.
-  8. Consistent fp32 KiB / MiB memory accounting (1 MiB = 1024 KiB) across all models.
+Part 1 Q1-Journal Reproducible Benchmark Suite (v4 Revision — Complete Resolution of v3 Review):
+  1. Drops raw extrapolating `Year`; detrended cooling threshold tau* = 25.0 C; robust IQR loss QA.
+  2. 25-Model, 5-Seed Benchmark (seeds 42, 123, 7, 2024, 999):
+     - Explicit naming: `PatchTST-CM` (channel-mixing, no RevIN) vs. faithful `PatchTST-RevIN (3x)`
+       (channel-independent target patching + Reversible Instance Normalization, Nie et al. 2023).
+     - Includes Naive (Lag-1, Weekday-Adj, Lag-7, 7d Mean), SARIMAX, Ridge, Ridge-Diff, XGBoost (Level/Diff),
+       LightGBM, DLinear (CI, 30p), MLP (14xF), PatchTST-CM (1x/3x/Diff-3x), PatchTST-RevIN (3x),
+       BiGRU, BiLSTM, BiLSTM-Attn, Transformer, CNN-BiGRU-T, Hybrids, Equal-Weight RNN, Val-Opt RNN.
+  3. 95% Hansen MCS (MAE & RMSE, Seed 42 & 5-Seed) + HLN-DM (Ref = PatchTST-CM 3x, Holm-Bonferroni).
+  4. 5-Way Conformal Ablation on BOTH PatchTST-CM (3x) AND Ridge (14xF) at 80% & 90% nominal,
+     WITH 95% moving-block bootstrap CIs (block length 7, 1,000 resamples) on overall AND seasonal PICP!
+  5. Architecture-dependent 5-Seed Feature & PCA Ablation across PatchTST-CM (3x), Equal-Weight RNN, & Ridge.
+  6. Lagged-demand (y_{t-1}) bins (no realized-target selection bias) + paired Holiday/Eid tests (n=41).
+  7. Gap-handling audit (420 gap-free vs. 42 gap-spanning test windows; 10 gap-spanning Val-ES windows).
+  8. Eid +/-1-day lunar-sighting jitter sensitivity test on frozen trained models.
+  9. Summer-inclusive validation sensitivity check (tuning on full-year 2024 Fold 2 vs. Jul-Nov Val-ES).
+ 10. Exact CPU hardware & thread metadata + Direct merged-block permutation importance on PatchTST-CM (3x).
 """
 import json
 import math
 import os
+import platform
+import subprocess
 import time
 import warnings
 
@@ -51,7 +45,8 @@ import xgboost as xgb
 import lightgbm as lgb
 
 warnings.filterwarnings("ignore")
-torch.set_num_threads(2)
+TORCH_THREADS = 2
+torch.set_num_threads(TORCH_THREADS)
 
 FIG_DIR = "part1_journal_package/figures"
 OUT_DIR = "part1_journal_package/results"
@@ -65,6 +60,15 @@ BATCH_SIZE = 32
 PATIENCE = 8
 OPT_WD = 1e-5
 OPT_DROPOUT = 0.20
+
+
+def get_cpu_brand():
+    try:
+        out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
+        ncpu = subprocess.check_output(["sysctl", "-n", "hw.ncpu"], text=True).strip()
+        return f"{out} ({ncpu}-core ARM64)"
+    except Exception:
+        return platform.processor() or "Unknown CPU"
 
 
 def set_seed(seed):
@@ -81,7 +85,6 @@ def windowing(X_input, y_input, history_size):
 
 
 def estimate_detrended_cooling_threshold(temp_series, demand_series):
-    """Estimate piecewise cooling hinge tau* on LINEARLY DETRENDED training demand (unconfounded by secular growth)."""
     t = temp_series.values.astype(float)
     y = demand_series.values.astype(float)
     idx = np.arange(len(y), dtype=float)
@@ -99,7 +102,7 @@ def estimate_detrended_cooling_threshold(temp_series, demand_series):
     return best_tau, best_rmse, best_slope, float(trend_slope * 365.25)
 
 
-def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None):
+def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None, eid_jitter_test=0):
     df = pd.read_excel("version_5_extended_backup.xlsx")
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values("Date").reset_index(drop=True)
@@ -109,7 +112,6 @@ def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None
     date_gaps = df["Date"].diff().dt.days.fillna(1.0)
     df["Post_Gap_Flag"] = (date_gaps > 1.0).astype(int)
 
-    # Robust transmission-loss QA (flag both negatives and upper extreme spikes > Q3 + 3*IQR)
     gen_col = "Max. Demand at eve. peak (Generation end)"
     sub_col = "Max. Demand at eve. peak (Sub-station end)"
     raw_loss = df[gen_col] - df[sub_col]
@@ -130,9 +132,26 @@ def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None
     target_col = gen_col
     y_shifted = df[target_col].shift(1)
 
-    # Drop raw extrapolating Year column!
     if "Year" in df.columns:
         df = df.drop(columns=["Year"])
+
+    # Optional test-only Eid +/-1-day lunar-sighting jitter (applied strictly to post-val test rows)
+    if eid_jitter_test != 0:
+        approx_te_start = int(0.80 * len(df))
+        hol_s = df["Holiday_cat"].copy()
+        name_s = df["Holiday name"].copy()
+        te_mask = np.arange(len(df)) >= approx_te_start
+        eid_mask = te_mask & name_s.astype(str).str.contains("Eid", case=False, na=False)
+        if eid_mask.any():
+            hol_te = hol_s.iloc[approx_te_start:].copy()
+            name_te = name_s.iloc[approx_te_start:].copy()
+            # Shift only Eid indicator positions by eid_jitter_test days
+            is_eid_te = name_te.astype(str).str.contains("Eid", case=False, na=False)
+            new_hol_te = hol_te.copy()
+            new_hol_te[is_eid_te] = 0
+            shifted_idx = np.clip(np.where(is_eid_te.values)[0] + eid_jitter_test, 0, len(hol_te) - 1)
+            new_hol_te.iloc[shifted_idx] = hol_te.values[is_eid_te.values]
+            df.iloc[approx_te_start:, df.columns.get_loc("Holiday_cat")] = new_hol_te.values
 
     pre_train_cut = int(0.70 * len(df))
     if tau_override is None:
@@ -211,7 +230,12 @@ def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None
     va_meta = meta.iloc[train_cut + HIST_SIZE : val_cut].copy()
     te_meta = meta.iloc[val_cut + HIST_SIZE :].copy()
 
-    # Lag-1 target in MW for each window (for Delta-y models!)
+    # Track exact windows spanning any calendar gap (> 14 calendar days from window start to target)
+    te_all_dates = df_enc.index[val_cut:]
+    te_gap_span = np.array([(te_all_dates[i] - te_all_dates[i - HIST_SIZE]).days > HIST_SIZE for i in range(HIST_SIZE, len(te_all_dates))])
+    va_all_dates = df_enc.index[train_cut:val_cut]
+    va_gap_span = np.array([(va_all_dates[i] - va_all_dates[i - HIST_SIZE]).days > HIST_SIZE for i in range(HIST_SIZE, len(va_all_dates))])
+
     y_full = df_enc[target_col].values
     y_tr_lag1 = y_full[HIST_SIZE - 1 : train_cut - 1].reshape(-1, 1)
     y_tr_mw = y_full[HIST_SIZE : train_cut].reshape(-1, 1)
@@ -228,14 +252,15 @@ def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None
         "X_tr": X_tr, "y_tr": y_tr, "y_tr_mw": y_tr_mw, "y_tr_lag1": y_tr_lag1,
         "dy_tr_mw": dy_tr_mw, "dy_tr_norm": dy_tr_norm, "s_dy": s_dy,
         "X_va": X_va, "y_va": y_va, "y_va_inv": y_va_inv, "y_va_lag1": y_va_lag1,
-        "va_dates": va_dates, "va_meta": va_meta,
+        "va_dates": va_dates, "va_meta": va_meta, "va_gap_span": va_gap_span,
         "X_va_es": X_va[:va_es_end], "y_va_es": y_va[:va_es_end], "y_va_es_inv": y_va_inv[:va_es_end],
         "y_va_es_lag1": y_va_lag1[:va_es_end], "dy_va_es_mw": dy_va_mw[:va_es_end], "dy_va_es_norm": dy_va_es_norm,
         "X_va_cal": X_va[va_cal_start:], "y_va_cal": y_va[va_cal_start:], "y_va_cal_inv": y_va_inv[va_cal_start:],
         "y_va_cal_lag1": y_va_lag1[va_cal_start:],
         "X_te": X_te, "y_te": y_te, "y_te_inv": y_te_inv, "y_te_lag1": y_te_lag1,
-        "te_dates": te_dates, "te_meta": te_meta,
-        "sy": sy, "meta_full": meta, "feat_names": feat_names,
+        "te_dates": te_dates, "te_meta": te_meta, "te_gap_span": te_gap_span,
+        "sy": sy, "meta_full": meta, "feat_names": feat_names, "df_enc": df_enc,
+        "cont_cols": cont_cols, "cat_onehot_cols": cat_onehot_cols,
         "train_dates": (df_enc.index[0], df_enc.index[train_cut - 1]),
         "val_dates": (df_enc.index[train_cut], df_enc.index[val_cut - 1]),
         "test_dates": (te_dates[0], te_dates[-1]),
@@ -246,6 +271,9 @@ def prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=None
             "calendar_span_days": full_span_days,
             "raw_records": int(full_span_days - n_missing_calendar),
             "missing_calendar_days": int(n_missing_calendar),
+            "val_es_gap_spanning_windows": int(va_gap_span[:va_es_end].sum()),
+            "val_cal_gap_spanning_windows": int(va_gap_span[va_cal_start:].sum()),
+            "test_gap_spanning_windows": int(te_gap_span.sum()),
             "negative_loss_records": n_neg_loss,
             "upper_outlier_loss_records": n_hi_outliers,
             "upper_iqr_cutoff_mw": round(hi_cut, 1),
@@ -296,7 +324,7 @@ def run_ridge_baseline(X_tr_2d, y_tr, X_va_es_2d, y_va_es, X_va_cal_2d, X_te_2d,
     lat_ms = round((time.perf_counter() - t0) / 60 * 1000.0, 2)
     p_vc = sy.inverse_transform(best_mod.predict(X_va_cal_2d).reshape(-1, 1))
     p_te = sy.inverse_transform(best_mod.predict(X_te_2d).reshape(-1, 1))
-    return p_vc, p_te, best_alpha, int(X_tr_2d.shape[1] + 1), lat_ms
+    return p_vc, p_te, best_alpha, int(X_tr_2d.shape[1] + 1), lat_ms, best_mod
 
 
 def run_ridge_diff_baseline(X_tr_2d, dy_tr_mw, X_va_es_2d, dy_va_es_mw, X_va_cal_2d, y_va_cal_lag1, X_te_2d, y_te_lag1):
@@ -313,7 +341,7 @@ def run_ridge_diff_baseline(X_tr_2d, dy_tr_mw, X_va_es_2d, dy_va_es_mw, X_va_cal
 
 # --- PyTorch Model Architectures ---
 class StandardDLinearModel(nn.Module):
-    """Standard Channel-Independent DLinear (Zeng et al., AAAI 2023) on the 14-day target lag channel (30 params)."""
+    """Standard Channel-Independent DLinear (Zeng et al., AAAI 2023) on target channel (30 params)."""
     def __init__(self, seq_len=14, kernel_size=5):
         super().__init__()
         self.pad = (kernel_size - 1) // 2
@@ -321,7 +349,6 @@ class StandardDLinearModel(nn.Module):
         self.linear_seasonal = nn.Linear(seq_len, 1)
         self.linear_trend = nn.Linear(seq_len, 1)
     def forward(self, x):
-        # Strictly target channel x[:, :, -1:] -> (B, L, 1)
         y_seq = x[:, :, -1:]
         front = y_seq[:, 0:1, :].repeat(1, self.pad, 1)
         end = y_seq[:, -1:, :].repeat(1, self.pad, 1)
@@ -332,7 +359,6 @@ class StandardDLinearModel(nn.Module):
 
 
 class MLPModel(nn.Module):
-    """2-layer Feed-Forward MLP on the identical flattened 14 x F lag matrix."""
     def __init__(self, n_feat, seq_len=14):
         super().__init__()
         self.net = nn.Sequential(
@@ -341,12 +367,11 @@ class MLPModel(nn.Module):
             nn.Linear(128, 64), nn.ReLU(), nn.Dropout(OPT_DROPOUT),
             nn.Linear(64, 1),
         )
-    def forward(self, x):
-        return self.net(x)
+    def forward(self, x): return self.net(x)
 
 
-class PatchTSTModel(nn.Module):
-    """Channel-mixing PatchTST (no RevIN; 6 overlapping patches P=4, S=2; 2 Pre-Norm Transformer layers, d=64, 4 heads)."""
+class PatchTSTCMModel(nn.Module):
+    """Channel-Mixing Patched Transformer (no RevIN; P=4, S=2, 6 patches, 2 Pre-Norm layers, d=64, 4 heads)."""
     def __init__(self, n_feat, seq_len=14, patch_len=4, stride=2, d_model=64):
         super().__init__()
         self.patch_len, self.stride = patch_len, stride
@@ -367,6 +392,41 @@ class PatchTSTModel(nn.Module):
         patches = patches.reshape(x.size(0), self.n_patches, -1)
         z = self.patch_proj(patches) + self.pos_emb
         return self.head(self.encoder(z))
+
+
+class PatchTSTRevINModel(nn.Module):
+    """
+    Faithful Channel-Independent + RevIN PatchTST (Nie et al., ICLR 2023):
+    Applies Reversible Instance Normalization (RevIN) to the 14-day target load sequence,
+    patches it channel-independently (P=4, S=2), passes through a 2-layer Pre-Norm Transformer,
+    and denormalizes the scalar prediction back via the instance mean and std.
+    """
+    def __init__(self, seq_len=14, patch_len=4, stride=2, d_model=64, eps=1e-5):
+        super().__init__()
+        self.patch_len, self.stride, self.eps = patch_len, stride, eps
+        self.n_patches = (seq_len - patch_len) // stride + 1
+        self.revin_weight = nn.Parameter(torch.ones(1, 1))
+        self.revin_bias = nn.Parameter(torch.zeros(1, 1))
+        self.patch_proj = nn.Linear(patch_len, d_model)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.n_patches, d_model))
+        enc = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=4, dim_feedforward=128,
+            dropout=OPT_DROPOUT, batch_first=True, norm_first=True
+        )
+        self.encoder = nn.TransformerEncoder(enc, num_layers=2)
+        self.head = nn.Sequential(
+            nn.Flatten(), nn.Dropout(OPT_DROPOUT),
+            nn.Linear(self.n_patches * d_model, 1)
+        )
+    def forward(self, x):
+        y_seq = x[:, :, -1]  # (B, L)
+        mu = y_seq.mean(dim=1, keepdim=True)
+        sd = torch.sqrt(y_seq.var(dim=1, keepdim=True, unbiased=False) + self.eps)
+        y_norm = ((y_seq - mu) / sd) * self.revin_weight + self.revin_bias
+        patches = y_norm.unfold(dimension=1, size=self.patch_len, step=self.stride)  # (B, n_patches, P)
+        z = self.patch_proj(patches) + self.pos_emb
+        out_norm = self.head(self.encoder(z))
+        return ((out_norm - self.revin_bias) / (self.revin_weight + self.eps)) * sd + mu
 
 
 class BiGRUModel(nn.Module):
@@ -494,9 +554,25 @@ def optimize_val_weights(y_val_cal, preds_list):
     return w / np.sum(w)
 
 
-# --- 5-Way Conformal Prediction Ablation (Untouched Val-Cal Residuals!) ---
+def block_bootstrap_picp_ci(covered, block_len=7, n_boot=1000, seed=42):
+    cov = np.asarray(covered, dtype=float)
+    T = len(cov)
+    bl = min(block_len, max(1, T // 3))
+    rng = np.random.default_rng(seed)
+    n_blocks = int(math.ceil(T / bl))
+    boots = np.empty(n_boot)
+    for b in range(n_boot):
+        starts = rng.integers(0, T - bl + 1, size=n_blocks)
+        idx = np.concatenate([np.arange(s, s + bl) for s in starts])[:T]
+        boots[b] = np.mean(cov[idx]) * 100.0
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    return float(lo), float(hi), float((hi - lo) / 2.0)
+
+
 def eval_interval(method_name, model_name, yt, lo, hi, alpha):
-    picp = float(np.mean((yt >= lo) & (yt <= hi)) * 100.0)
+    cov = (yt >= lo) & (yt <= hi)
+    picp = float(np.mean(cov) * 100.0)
+    ci_lo, ci_hi, ci_hw = block_bootstrap_picp_ci(cov, block_len=7, n_boot=1000, seed=42)
     width = float(np.mean(hi - lo))
     pinaw = float(width / (np.max(yt) - np.min(yt)) * 100.0)
     penalty = np.where(yt < lo, (2.0 / alpha) * (lo - yt),
@@ -505,31 +581,22 @@ def eval_interval(method_name, model_name, yt, lo, hi, alpha):
     return {
         "Model": model_name, "Method": method_name, "Nominal_%": int((1.0 - alpha) * 100),
         "Mean_Half_Width_MW": width / 2.0, "Mean_Width_MW": width,
-        "PICP_%": picp, "PINAW_%": pinaw, "Winkler_MW": winkler, "lo": lo, "hi": hi
+        "PICP_%": picp, "PICP_CI_lo": ci_lo, "PICP_CI_hi": ci_hi, "PICP_CI_hw": ci_hw,
+        "PINAW_%": pinaw, "Winkler_MW": winkler, "lo": lo, "hi": hi
     }
 
 
 def run_5way_conformal(model_name, y_cal, pred_cal, y_test, pred_test, alpha, gamma=0.05, scale_win=14, score_win=120):
-    """
-    5-way conformal ablation on strictly untouched Val-Cal residuals:
-      1. Static Split Conformal (fixed Val-Cal quantile)
-      2. Rolling-Window Conformal (120-day unweighted sliding window, no alpha update)
-      3. Locally Normalized Static (14-day causal local scale sigma_t, fixed Val-Cal normalized quantile)
-      4. Plain ACI (Gibbs & Candes online alpha_t in [0.02, 0.50] over 120 raw residuals, no local scale)
-      5. Locally Normalized ACI (both 14-day local scale sigma_t and online alpha_t in [0.02, 0.50] over 120 scores)
-    """
     res_cal = np.abs(y_cal.ravel() - pred_cal.ravel())
     yt = y_test.ravel()
     yp = pred_test.ravel()
     n_cal = len(res_cal)
     floor_sigma = max(100.0, float(np.percentile(res_cal, 25)))
 
-    # 1. Static Split
     q_lvl = min(1.0, math.ceil((n_cal + 1) * (1.0 - alpha)) / n_cal)
     q_stat = float(np.quantile(res_cal, q_lvl, method="higher"))
     r1 = eval_interval("1. Static Split Conformal", model_name, yt, yp - q_stat, yp + q_stat, alpha)
 
-    # 2. Rolling-Window Conformal (120d)
     hist_raw = list(res_cal)
     lo2, hi2 = np.empty(len(yt)), np.empty(len(yt))
     for t in range(len(yt)):
@@ -539,14 +606,12 @@ def run_5way_conformal(model_name, y_cal, pred_cal, y_test, pred_test, alpha, ga
         hist_raw.append(abs(yt[t] - yp[t]))
     r2 = eval_interval("2. Rolling-Window Conformal (120d)", model_name, yt, lo2, hi2, alpha)
 
-    # Build causal normalized calibration scores
     norm_cal = []
     for i in range(n_cal):
         sig = max(floor_sigma, float(np.mean(res_cal[: max(1, i + 1)])) if i < 5 else float(np.mean(res_cal[max(0, i - scale_win) : i])))
         norm_cal.append(res_cal[i] / sig)
     q_norm_stat = float(np.quantile(norm_cal, q_lvl, method="higher"))
 
-    # 3. Locally Normalized Static (isolates local scaling without online alpha update)
     hist_r3 = list(res_cal)
     lo3, hi3 = np.empty(len(yt)), np.empty(len(yt))
     for t in range(len(yt)):
@@ -556,7 +621,6 @@ def run_5way_conformal(model_name, y_cal, pred_cal, y_test, pred_test, alpha, ga
         hist_r3.append(abs(yt[t] - yp[t]))
     r3 = eval_interval("3. Locally Normalized Static", model_name, yt, lo3, hi3, alpha)
 
-    # 4. Plain ACI (isolates online alpha_t feedback without local scaling; safe alpha_t in [0.02, 0.50])
     hist_r4 = list(res_cal)
     alpha_t = alpha
     lo4, hi4 = np.empty(len(yt)), np.empty(len(yt))
@@ -569,7 +633,6 @@ def run_5way_conformal(model_name, y_cal, pred_cal, y_test, pred_test, alpha, ga
         hist_r4.append(abs(yt[t] - yp[t]))
     r4 = eval_interval("4. Plain ACI (No Local Scale)", model_name, yt, lo4, hi4, alpha)
 
-    # 5. Locally Normalized ACI (LN-ACI)
     hist_r5 = list(res_cal)
     norm_scores = list(norm_cal)
     alpha_t = alpha
@@ -594,21 +657,23 @@ def dm_hln_and_bootstrap(y_true, pred_ref, pred_other, h=1, max_lag=14, block_le
     e_b = np.abs(y_true.ravel() - pred_other.ravel())
     d = e_a - e_b
     T = len(d)
+    ml = min(max_lag, max(1, T // 4))
+    bl = min(block_len, max(1, T // 3))
     d_mean = float(np.mean(d))
     var_d = np.var(d, ddof=1)
-    for k in range(1, max_lag + 1):
-        w = 1.0 - k / (max_lag + 1.0)
+    for k in range(1, ml + 1):
+        w = 1.0 - k / (ml + 1.0)
         var_d += 2.0 * w * np.cov(d[k:], d[:-k], ddof=1)[0, 1]
     dm_raw = float(d_mean / np.sqrt(max(var_d, 1e-12) / T))
     hln_factor = math.sqrt((T + 1.0 - 2.0 * h + (h * (h - 1.0)) / T) / T)
     dm_hln = dm_raw * hln_factor
     p_val = float(2.0 * stats.t.sf(np.abs(dm_hln), df=T - 1))
     rng = np.random.default_rng(seed)
-    n_blocks = int(math.ceil(T / block_len))
+    n_blocks = int(math.ceil(T / bl))
     diffs = np.empty(n_boot)
     for b in range(n_boot):
-        starts = rng.integers(0, T - block_len + 1, size=n_blocks)
-        idx = np.concatenate([np.arange(s, s + block_len) for s in starts])[:T]
+        starts = rng.integers(0, T - bl + 1, size=n_blocks)
+        idx = np.concatenate([np.arange(s, s + bl) for s in starts])[:T]
         diffs[b] = np.mean(d[idx])
     ci_lo, ci_hi = np.percentile(diffs, [2.5, 97.5])
     return dm_hln, p_val, d_mean, float(ci_lo), float(ci_hi)
@@ -627,10 +692,6 @@ def holm_bonferroni(pvals):
 
 
 def model_confidence_set(loss_matrix, model_names, alpha=0.05, block_len=7, n_boot=1000, seed=42):
-    """
-    Hansen, Lunde & Nason (2011) Model Confidence Set (MCS) via T_max statistic & moving-block bootstrap.
-    Returns dict {model: mcs_p_value} where p_MCS >= alpha indicates membership in the 95% MCS.
-    """
     T, M = loss_matrix.shape
     rng = np.random.default_rng(seed)
     n_blocks = int(math.ceil(T / block_len))
@@ -647,7 +708,6 @@ def model_confidence_set(loss_matrix, model_names, alpha=0.05, block_len=7, n_bo
         l_bar = L.mean(axis=0)
         l_dot = l_bar.mean()
         d_i = l_bar - l_dot
-        # Bootstrap distribution of d_i
         d_boot = np.empty((n_boot, len(active)))
         for b in range(n_boot):
             lb = L[boot_idx[b]].mean(axis=0)
@@ -666,10 +726,6 @@ def model_confidence_set(loss_matrix, model_names, alpha=0.05, block_len=7, n_bo
 
 
 def compute_patchtst3_group_permutation_importance(pt_models, X_eval, y_eval_inv, sy, feat_names, n_repeats=15, seed=42):
-    """
-    Direct Group Permutation Importance on the deployed PatchTST-Ensemble (3x)
-    with MERGED collinear Autoregressive Load History (National + Divisional).
-    """
     def eval_pt3(X_in):
         pred = np.mean([sy.inverse_transform(predict_torch(m, X_in)) for m in pt_models], axis=0)
         return float(mean_absolute_error(y_eval_inv, pred))
@@ -722,11 +778,11 @@ def compute_patchtst3_group_permutation_importance(pt_models, X_eval, y_eval_inv
 
 if __name__ == "__main__":
     t_start = time.perf_counter()
-    print("=== ROUND-2 REVISION: 24 MODELS x 5 SEEDS, MCS, 5-WAY CONFORMAL ABLATION, PATCHTST-3x DOWNSTREAM ===", flush=True)
+    cpu_brand = get_cpu_brand()
+    print(f"=== v4 REVISION SUITE (25 MODELS x 5 SEEDS) | CPU: {cpu_brand} | torch_threads={TORCH_THREADS} ===", flush=True)
     ds = prepare_dataset(use_cdd=True, use_eid=True, use_pca=False)
-    print(f"Detrended train-only tau* = {ds['tau_star']:.1f} C (slope = +{ds['tau_slope']:.1f} MW/C, trend = +{ds['trend_mw_per_yr']:.1f} MW/yr)", flush=True)
+    print(f"Detrended tau* = {ds['tau_star']:.1f} C (+{ds['tau_slope']:.1f} MW/C, trend +{ds['trend_mw_per_yr']:.1f} MW/yr)", flush=True)
     print(f"Data QA: {ds['data_qa']}", flush=True)
-    print(f"Rows: {ds['n_raw']} | Features: {ds['n_features']} (Year dropped!) | Train: {len(ds['X_tr'])} | Val-ES: {len(ds['X_va_es'])} | Val-Cal: {len(ds['X_va_cal'])} | Test: {len(ds['X_te'])}", flush=True)
 
     X_tr, y_tr = ds["X_tr"], ds["y_tr"]
     X_va_es, y_va_es = ds["X_va_es"], ds["y_va_es"]
@@ -738,7 +794,7 @@ if __name__ == "__main__":
     )
     n_f = X_tr.shape[-1]
 
-    # Baselines: Lag-1, Weekday-Adj Persistence, Lag-7, 7-Day Mean
+    # Baselines: Lag-1, Weekday-Adj Persistence, Lag-7 (row & calendar-aware check), 7-Day Mean
     y_full = ds["df_raw_target"].values
     tc, vc = ds["train_cut"], ds["val_cut"]
     p_persist_te = ds["y_te_lag1"]
@@ -752,29 +808,29 @@ if __name__ == "__main__":
     p_wkday_pers_te = p_persist_te + dow_step_te
     wkday_mae = float(mean_absolute_error(y_te_inv, p_wkday_pers_te))
 
-    print("Fitting SARIMAX, Ridge (Level), and Ridge-Diff (Delta-y)...", flush=True)
+    print("Fitting SARIMAX, Ridge, and Ridge-Diff...", flush=True)
     p_sarimax_va, p_sarimax_te, sarimax_p, sarimax_ms = run_sarimax_baseline(ds)
-    p_ridge_vc, p_ridge_te, ridge_alpha, ridge_p, ridge_ms = run_ridge_baseline(X_tr_2d, y_tr, X_va_es_2d, y_va_es, X_va_cal_2d, X_te_2d, sy)
+    p_ridge_vc, p_ridge_te, ridge_alpha, ridge_p, ridge_ms, ridge_mod = run_ridge_baseline(
+        X_tr_2d, y_tr, X_va_es_2d, y_va_es, X_va_cal_2d, X_te_2d, sy
+    )
     p_ridged_vc, p_ridged_te, ridged_alpha = run_ridge_diff_baseline(
         X_tr_2d, ds["dy_tr_mw"], X_va_es_2d, ds["dy_va_es_mw"], X_va_cal_2d, ds["y_va_cal_lag1"], X_te_2d, ds["y_te_lag1"]
     )
-    print(f"  SARIMAX:             MAE={mean_absolute_error(y_te_inv, p_sarimax_te):6.2f} MW", flush=True)
-    print(f"  Ridge (alpha={ridge_alpha:g}):    MAE={mean_absolute_error(y_te_inv, p_ridge_te):6.2f} MW", flush=True)
-    print(f"  Ridge-Diff (a={ridged_alpha:g}):  MAE={mean_absolute_error(y_te_inv, p_ridged_te):6.2f} MW", flush=True)
-    print(f"  Weekday-Adj Persist: MAE={wkday_mae:6.2f} MW", flush=True)
+    print(f"  SARIMAX={mean_absolute_error(y_te_inv, p_sarimax_te):.2f} | Ridge(a={ridge_alpha:g})={mean_absolute_error(y_te_inv, p_ridge_te):.2f} | Ridge-Diff(a={ridged_alpha:g})={mean_absolute_error(y_te_inv, p_ridged_te):.2f} | Wkday={wkday_mae:.2f}", flush=True)
 
-    # Matched Val-ES LR tuning per neural family (Seed 42 only, strictly on Val-ES!)
+    # Val-ES LR selection per neural family (Seed 42)
     dl_builders = [
         ("DLinear (CI)", lambda: StandardDLinearModel(HIST_SIZE)),
         ("MLP (14xF)", lambda: MLPModel(n_f)),
-        ("PatchTST", lambda: PatchTSTModel(n_f)),
+        ("PatchTST-CM (Single)", lambda: PatchTSTCMModel(n_f)),
+        ("PatchTST-RevIN (Single)", lambda: PatchTSTRevINModel(HIST_SIZE)),
         ("BiGRU", lambda: BiGRUModel(n_f)),
         ("BiLSTM", lambda: BiLSTMModel(n_f)),
         ("BiLSTM-Attention", lambda: BiLSTMAttnModel(n_f)),
         ("Transformer", lambda: TransformerModel(n_f)),
         ("CNN-BiGRU-Transformer", lambda: CNNBiGRUTransModel(n_f)),
     ]
-    print("\nTuning learning rate per neural family strictly on Val-ES (Seed 42)...", flush=True)
+    print("\nSelecting LR per neural family on Val-ES (Seed 42)...", flush=True)
     tuned_lrs = {}
     for name, fn in dl_builders:
         cands = [5e-3, 1e-2] if name == "DLinear (CI)" else [1e-3, 2.5e-3]
@@ -784,16 +840,15 @@ if __name__ == "__main__":
             if vl < best_vl:
                 best_vl, best_lr = vl, lr_c
         tuned_lrs[name] = best_lr
-        print(f"  {name:24s} -> best Val-ES lr = {best_lr:g} (val L1={best_vl:.4f})", flush=True)
+        print(f"  {name:25s} -> lr = {best_lr:g} (Val-ES L1={best_vl:.4f})", flush=True)
 
-    # Tune PatchTST-Diff LR on Val-ES
     best_vl_d, lr_pt_diff = float("inf"), 1e-3
     for lr_c in [1e-3, 2.5e-3]:
-        _, _, vl = train_torch_model(PatchTSTModel(n_f), X_tr, ds["dy_tr_norm"], X_va_es, ds["dy_va_es_norm"], 42, lr=lr_c)
+        _, _, vl = train_torch_model(PatchTSTCMModel(n_f), X_tr, ds["dy_tr_norm"], X_va_es, ds["dy_va_es_norm"], 42, lr=lr_c)
         if vl < best_vl_d:
             best_vl_d, lr_pt_diff = vl, lr_c
-    tuned_lrs["PatchTST-Diff (3x)"] = lr_pt_diff
-    print(f"  {'PatchTST-Diff (3x)':24s} -> best Val-ES lr = {lr_pt_diff:g}", flush=True)
+    tuned_lrs["PatchTST-CM-Diff (3x)"] = lr_pt_diff
+    print(f"  {'PatchTST-CM-Diff (3x)':25s} -> lr = {lr_pt_diff:g}", flush=True)
 
     all_seed_metrics = []
     seed_preds = {s: {} for s in SEEDS}
@@ -806,10 +861,11 @@ if __name__ == "__main__":
         "Ridge-Diff (Δy)": {"Params": ridge_p, "Size_KiB": round(ridge_p * 4 / 1024, 2), "CPU_ms": ridge_ms},
     }
     seed0_pt3_models = []
+    seed0_rnn_models = []
 
     for s in SEEDS:
-        print(f"\n--- Running Seed {s} ---", flush=True)
-        det_baselines = [
+        print(f"\n--- Seed {s} ---", flush=True)
+        for bn, bp in [
             ("Persistence (Lag-1)", p_persist_te),
             ("Weekday-Adj Persistence", p_wkday_pers_te),
             ("Seasonal Naive (Lag-7)", p_lag7_te),
@@ -817,8 +873,7 @@ if __name__ == "__main__":
             ("SARIMAX", p_sarimax_te),
             ("Ridge (14xF)", p_ridge_te),
             ("Ridge-Diff (Δy)", p_ridged_te),
-        ]
-        for bn, bp in det_baselines:
+        ]:
             seed_preds[s][bn] = bp
             all_seed_metrics.append({"Seed": s, "Model": bn, **calc_metrics(y_te_inv, bp, wkday_mae)})
         seed_val_cal_preds[s]["Ridge (14xF)"] = p_ridge_vc
@@ -855,7 +910,7 @@ if __name__ == "__main__":
             for _ in range(60): _ = lm.predict(X_te_2d[:1])
             eff_profile["LightGBM"] = {"Params": 0, "Size_KiB": 0.0, "CPU_ms": round((time.perf_counter() - t0) / 60 * 1000, 2)}
 
-        # Neural models with matched Val-ES tuned LR
+        # Neural models
         trained_dl = {}
         for name, fn in dl_builders:
             mod, vh, _ = train_torch_model(fn(), X_tr, y_tr, X_va_es, y_va_es, s, lr=tuned_lrs[name])
@@ -866,8 +921,8 @@ if __name__ == "__main__":
             seed_preds[s][name] = pred_te
             trained_dl[name] = mod
             mr = calc_metrics(y_te_inv, pred_te, wkday_mae)
-            print(f"  [Seed {s}] {name:24s}: MAE={mr['MAE']:6.1f} | RMSE={mr['RMSE']:6.1f} | SS={mr['Skill_Wkday_%']:+5.1f}%", flush=True)
-            all_seed_metrics.append({"Seed": s, "Model": name, **mr})
+            if name != "PatchTST-RevIN (Single)":
+                all_seed_metrics.append({"Seed": s, "Model": name, **mr})
             if s == SEEDS[0]:
                 np_cnt = sum(p.numel() for p in mod.parameters())
                 eff_profile[name] = {
@@ -875,46 +930,61 @@ if __name__ == "__main__":
                     "CPU_ms": round(measure_torch_latency(mod, X_te[:1]), 2)
                 }
 
-        # Equal-Budget 3-Member PatchTST-Ensemble (Level)
-        pt_vc_list = [seed_val_cal_preds[s]["PatchTST"]]
-        pt_te_list = [seed_preds[s]["PatchTST"]]
+        # 3-Member PatchTST-CM (3x)
+        pt_vc_list = [seed_val_cal_preds[s]["PatchTST-CM (Single)"]]
+        pt_te_list = [seed_preds[s]["PatchTST-CM (Single)"]]
         if s == SEEDS[0]:
-            seed0_pt3_models = [trained_dl["PatchTST"]]
+            seed0_pt3_models = [trained_dl["PatchTST-CM (Single)"]]
+            seed0_rnn_models = [trained_dl["BiGRU"], trained_dl["BiLSTM-Attention"], trained_dl["BiLSTM"]]
         for offset in [1000, 2000]:
-            m_pt_extra, _, _ = train_torch_model(PatchTSTModel(n_f), X_tr, y_tr, X_va_es, y_va_es, s + offset, lr=tuned_lrs["PatchTST"])
+            m_pt_extra, _, _ = train_torch_model(PatchTSTCMModel(n_f), X_tr, y_tr, X_va_es, y_va_es, s + offset, lr=tuned_lrs["PatchTST-CM (Single)"])
             pt_vc_list.append(sy.inverse_transform(predict_torch(m_pt_extra, X_va_cal)))
             pt_te_list.append(sy.inverse_transform(predict_torch(m_pt_extra, X_te)))
             if s == SEEDS[0]:
                 seed0_pt3_models.append(m_pt_extra)
-        p_pt3_vc = np.mean(pt_vc_list, axis=0)
-        p_pt3_te = np.mean(pt_te_list, axis=0)
-        seed_val_cal_preds[s]["PatchTST-Ensemble (3x)"] = p_pt3_vc
-        seed_preds[s]["PatchTST-Ensemble (3x)"] = p_pt3_te
+        p_pt3_vc, p_pt3_te = np.mean(pt_vc_list, axis=0), np.mean(pt_te_list, axis=0)
+        seed_val_cal_preds[s]["PatchTST-CM (3x)"] = p_pt3_vc
+        seed_preds[s]["PatchTST-CM (3x)"] = p_pt3_te
         m_pt3 = calc_metrics(y_te_inv, p_pt3_te, wkday_mae)
-        print(f"  [Seed {s}] {'PatchTST-Ensemble (3x)':24s}: MAE={m_pt3['MAE']:6.1f} | RMSE={m_pt3['RMSE']:6.1f} | SS={m_pt3['Skill_Wkday_%']:+5.1f}%", flush=True)
-        all_seed_metrics.append({"Seed": s, "Model": "PatchTST-Ensemble (3x)", **m_pt3})
+        all_seed_metrics.append({"Seed": s, "Model": "PatchTST-CM (3x)", **m_pt3})
         if s == SEEDS[0]:
-            eff_profile["PatchTST-Ensemble (3x)"] = {
-                "Params": eff_profile["PatchTST"]["Params"] * 3,
-                "Size_KiB": round(eff_profile["PatchTST"]["Params"] * 3 * 4 / 1024, 2),
-                "CPU_ms": round(eff_profile["PatchTST"]["CPU_ms"] * 3, 2),
+            eff_profile["PatchTST-CM (3x)"] = {
+                "Params": eff_profile["PatchTST-CM (Single)"]["Params"] * 3,
+                "Size_KiB": round(eff_profile["PatchTST-CM (Single)"]["Params"] * 3 * 4 / 1024, 2),
+                "CPU_ms": round(eff_profile["PatchTST-CM (Single)"]["CPU_ms"] * 3, 2),
             }
 
-        # PatchTST-Diff (Delta-y, 3-member ensemble — gives neural models the same Delta-y option!)
+        # 3-Member Faithful PatchTST-RevIN (CI + RevIN, 3x)
+        rev_vc_list = [seed_val_cal_preds[s]["PatchTST-RevIN (Single)"]]
+        rev_te_list = [seed_preds[s]["PatchTST-RevIN (Single)"]]
+        for offset in [1000, 2000]:
+            m_rev_ex, _, _ = train_torch_model(PatchTSTRevINModel(HIST_SIZE), X_tr, y_tr, X_va_es, y_va_es, s + offset, lr=tuned_lrs["PatchTST-RevIN (Single)"])
+            rev_vc_list.append(sy.inverse_transform(predict_torch(m_rev_ex, X_va_cal)))
+            rev_te_list.append(sy.inverse_transform(predict_torch(m_rev_ex, X_te)))
+        p_rev_vc, p_rev_te = np.mean(rev_vc_list, axis=0), np.mean(rev_te_list, axis=0)
+        seed_val_cal_preds[s]["PatchTST-RevIN (CI, 3x)"] = p_rev_vc
+        seed_preds[s]["PatchTST-RevIN (CI, 3x)"] = p_rev_te
+        m_rev = calc_metrics(y_te_inv, p_rev_te, wkday_mae)
+        all_seed_metrics.append({"Seed": s, "Model": "PatchTST-RevIN (CI, 3x)", **m_rev})
+        if s == SEEDS[0]:
+            eff_profile["PatchTST-RevIN (CI, 3x)"] = {
+                "Params": eff_profile["PatchTST-RevIN (Single)"]["Params"] * 3,
+                "Size_KiB": round(eff_profile["PatchTST-RevIN (Single)"]["Params"] * 3 * 4 / 1024, 2),
+                "CPU_ms": round(eff_profile["PatchTST-RevIN (Single)"]["CPU_ms"] * 3, 2),
+            }
+
+        # 3-Member PatchTST-CM-Diff (Delta-y, 3x)
         ptd_vc_list, ptd_te_list = [], []
         for offset in [0, 1000, 2000]:
-            m_ptd, _, _ = train_torch_model(PatchTSTModel(n_f), X_tr, ds["dy_tr_norm"], X_va_es, ds["dy_va_es_norm"], s + offset, lr=lr_pt_diff)
+            m_ptd, _, _ = train_torch_model(PatchTSTCMModel(n_f), X_tr, ds["dy_tr_norm"], X_va_es, ds["dy_va_es_norm"], s + offset, lr=lr_pt_diff)
             ptd_vc_list.append(ds["y_va_cal_lag1"] + ds["s_dy"].inverse_transform(predict_torch(m_ptd, X_va_cal)))
             ptd_te_list.append(ds["y_te_lag1"] + ds["s_dy"].inverse_transform(predict_torch(m_ptd, X_te)))
-        p_ptd_vc = np.mean(ptd_vc_list, axis=0)
-        p_ptd_te = np.mean(ptd_te_list, axis=0)
-        seed_val_cal_preds[s]["PatchTST-Diff (Δy, 3x)"] = p_ptd_vc
-        seed_preds[s]["PatchTST-Diff (Δy, 3x)"] = p_ptd_te
-        m_ptd = calc_metrics(y_te_inv, p_ptd_te, wkday_mae)
-        print(f"  [Seed {s}] {'PatchTST-Diff (Δy, 3x)':24s}: MAE={m_ptd['MAE']:6.1f} | RMSE={m_ptd['RMSE']:6.1f} | SS={m_ptd['Skill_Wkday_%']:+5.1f}%", flush=True)
-        all_seed_metrics.append({"Seed": s, "Model": "PatchTST-Diff (Δy, 3x)", **m_ptd})
+        p_ptd_vc, p_ptd_te = np.mean(ptd_vc_list, axis=0), np.mean(ptd_te_list, axis=0)
+        seed_val_cal_preds[s]["PatchTST-CM-Diff (Δy, 3x)"] = p_ptd_vc
+        seed_preds[s]["PatchTST-CM-Diff (Δy, 3x)"] = p_ptd_te
+        all_seed_metrics.append({"Seed": s, "Model": "PatchTST-CM-Diff (Δy, 3x)", **calc_metrics(y_te_inv, p_ptd_te, wkday_mae)})
         if s == SEEDS[0]:
-            eff_profile["PatchTST-Diff (Δy, 3x)"] = eff_profile["PatchTST-Ensemble (3x)"].copy()
+            eff_profile["PatchTST-CM-Diff (Δy, 3x)"] = eff_profile["PatchTST-CM (3x)"].copy()
 
         # Residual Hybrids
         for base_name, h_name in [("BiGRU", "Hybrid BiGRU-XGBoost"), ("BiLSTM-Attention", "Hybrid BiLSTM-Attn-XGBoost")]:
@@ -927,16 +997,13 @@ if __name__ == "__main__":
             seed_preds[s][h_name] = pred_h
             all_seed_metrics.append({"Seed": s, "Model": h_name, **calc_metrics(y_te_inv, pred_h, wkday_mae)})
 
-        # Equal-Weight RNN Ensemble (3-network)
+        # Equal-Weight & Val-Opt RNN Ensembles
         p_eq_vc = (seed_val_cal_preds[s]["BiGRU"] + seed_val_cal_preds[s]["BiLSTM-Attention"] + seed_val_cal_preds[s]["BiLSTM"]) / 3.0
         p_eq_te = (seed_preds[s]["BiGRU"] + seed_preds[s]["BiLSTM-Attention"] + seed_preds[s]["BiLSTM"]) / 3.0
         seed_val_cal_preds[s]["Equal-Weight RNN Ens"] = p_eq_vc
         seed_preds[s]["Equal-Weight RNN Ens"] = p_eq_te
-        meq = calc_metrics(y_te_inv, p_eq_te, wkday_mae)
-        print(f"  [Seed {s}] {'Equal-Weight RNN Ens':24s}: MAE={meq['MAE']:6.1f} | RMSE={meq['RMSE']:6.1f} | SS={meq['Skill_Wkday_%']:+5.1f}%", flush=True)
-        all_seed_metrics.append({"Seed": s, "Model": "Equal-Weight RNN Ens", **meq})
+        all_seed_metrics.append({"Seed": s, "Model": "Equal-Weight RNN Ens", **calc_metrics(y_te_inv, p_eq_te, wkday_mae)})
 
-        # Val-Cal SLSQP Weighted RNN Ensemble
         w_opt = optimize_val_weights(y_va_cal_inv, [seed_val_cal_preds[s]["BiGRU"], seed_val_cal_preds[s]["BiLSTM-Attention"], seed_val_cal_preds[s]["BiLSTM"]])
         learned_weights.append(w_opt.tolist())
         p_opt_vc = w_opt[0] * seed_val_cal_preds[s]["BiGRU"] + w_opt[1] * seed_val_cal_preds[s]["BiLSTM-Attention"] + w_opt[2] * seed_val_cal_preds[s]["BiLSTM"]
@@ -944,6 +1011,7 @@ if __name__ == "__main__":
         seed_val_cal_preds[s]["Val-Opt RNN Ensemble"] = p_opt_vc
         seed_preds[s]["Val-Opt RNN Ensemble"] = p_opt_te
         all_seed_metrics.append({"Seed": s, "Model": "Val-Opt RNN Ensemble", **calc_metrics(y_te_inv, p_opt_te, wkday_mae)})
+        print(f"  [Seed {s}] PT-CM(3x)={m_pt3['MAE']:.1f} | PT-RevIN(3x)={m_rev['MAE']:.1f} | EqRNN={mean_absolute_error(y_te_inv, p_eq_te):.1f}", flush=True)
 
         if s == SEEDS[0]:
             tot_p = eff_profile["BiGRU"]["Params"] + eff_profile["BiLSTM-Attention"]["Params"] + eff_profile["BiLSTM"]["Params"]
@@ -959,14 +1027,14 @@ if __name__ == "__main__":
         Skill_Wkday_mean=("Skill_Wkday_%", "mean"),
         R2_mean=("R2", "mean"), R2_std=("R2", "std"),
     ).sort_values("MAE_mean")
-    print("\n=== 1. ROUND-2 24-MODEL 5-SEED BENCHMARK ===")
+    print("\n=== 1. v4 25-MODEL 5-SEED BENCHMARK ===")
     print(df_summary.round(2).to_string())
 
-    # 5-seed ensemble averages + Matched Seed-42 HLN-DM with PatchTST-Ensemble (3x) as Reference!
     mean_preds = {m: np.mean([seed_preds[s][m] for s in SEEDS], axis=0) for m in df_summary.index}
-    mean_vc_pt3 = np.mean([seed_val_cal_preds[s]["PatchTST-Ensemble (3x)"] for s in SEEDS], axis=0)
-    ref_name = "PatchTST-Ensemble (3x)"
+    mean_vc_pt3 = np.mean([seed_val_cal_preds[s]["PatchTST-CM (3x)"] for s in SEEDS], axis=0)
+    ref_name = "PatchTST-CM (3x)"
 
+    # 2. Descriptive HLN-DM (Ref = PatchTST-CM 3x)
     dm_rows = []
     for m in df_summary.index:
         if m == ref_name: continue
@@ -983,16 +1051,15 @@ if __name__ == "__main__":
     df_dm = pd.DataFrame(dm_rows).sort_values("Ens5_Delta_MW").reset_index(drop=True)
     df_dm["S42_p_holm"] = holm_bonferroni(df_dm["S42_p"].values)
     df_dm["Ens5_p_holm"] = holm_bonferroni(df_dm["Ens5_p"].values)
-    print(f"\n=== 2. HLN-DM TESTS (REF = {ref_name}: S42={mean_absolute_error(y_te_inv, seed_preds[42][ref_name]):.2f}, 5-Seed={mean_absolute_error(y_te_inv, mean_preds[ref_name]):.2f} MW) ===")
+    print(f"\n=== 2. DESCRIPTIVE HLN-DM (REF={ref_name}: S42={mean_absolute_error(y_te_inv, seed_preds[42][ref_name]):.2f}, 5-Seed={mean_absolute_error(y_te_inv, mean_preds[ref_name]):.2f}) ===")
     print(df_dm[["Comparator", "S42_MAE", "S42_Delta_MW", "S42_p_holm", "Ens5_MAE", "Ens5_Delta_MW", "Ens5_p_holm"]].round(4).to_string(index=False))
 
-    # Formal 95% Model Confidence Set (MCS) across top 12 models on BOTH MAE and RMSE (Seed 42 & 5-Seed)
+    # 3. 95% Hansen MCS (Top 12)
     mcs_models = list(df_summary.index[:12])
     L_mae_s42 = np.column_stack([np.abs(y_te_inv.ravel() - seed_preds[42][m].ravel()) for m in mcs_models])
     L_mse_s42 = np.column_stack([(y_te_inv.ravel() - seed_preds[42][m].ravel()) ** 2 for m in mcs_models])
     L_mae_5s = np.column_stack([np.abs(y_te_inv.ravel() - mean_preds[m].ravel()) for m in mcs_models])
     L_mse_5s = np.column_stack([(y_te_inv.ravel() - mean_preds[m].ravel()) ** 2 for m in mcs_models])
-
     mcs_mae_s42 = model_confidence_set(L_mae_s42, mcs_models)
     mcs_mse_s42 = model_confidence_set(L_mse_s42, mcs_models)
     mcs_mae_5s = model_confidence_set(L_mae_5s, mcs_models)
@@ -1004,27 +1071,10 @@ if __name__ == "__main__":
         "In_95_MCS_MAE_S42": mcs_mae_s42[m] >= 0.05,
         "In_95_MCS_RMSE_S42": mcs_mse_s42[m] >= 0.05,
     } for m in mcs_models])
-    print("\n=== 3. 95% HANSEN MODEL CONFIDENCE SET (MCS, BLOCK BOOTSTRAP) ===")
+    print("\n=== 3. 95% HANSEN MCS (TOP 12) ===")
     print(df_mcs.round(3).to_string(index=False))
 
-    # 5-Way Conformal Prediction Ablation on UNTOUCHED Val-Cal residuals of BOTH PatchTST-3x and Ridge!
-    cp_rows = []
-    cp_store_pt3 = {}
-    for m_lbl, vc_pred, te_pred in [
-        ("PatchTST-Ensemble (3x)", mean_vc_pt3, mean_preds["PatchTST-Ensemble (3x)"]),
-        ("Ridge (14xF)", p_ridge_vc, p_ridge_te),
-    ]:
-        for alpha in [0.20, 0.10]:
-            res_list = run_5way_conformal(m_lbl, y_va_cal_inv, vc_pred, y_te_inv, te_pred, alpha)
-            for r in res_list:
-                cp_rows.append({k: v for k, v in r.items() if k not in ("lo", "hi")})
-                if m_lbl == "PatchTST-Ensemble (3x)" and alpha == 0.10:
-                    cp_store_pt3[r["Method"]] = r
-    df_cp = pd.DataFrame(cp_rows)
-    print("\n=== 4. 5-WAY CONFORMAL ABLATION (UNTOUCHED VAL-CAL RESIDUALS: PATCHTST-3x & RIDGE) ===")
-    print(df_cp.round(2).to_string(index=False))
-
-    # Seasonal Coverage & Width Table (90% Nominal on PatchTST-3x across all 5 conformal methods!)
+    # 4. 5-Way Conformal Ablation WITH 95% Block-Bootstrap CIs for BOTH PatchTST-CM (3x) AND Ridge (80% & 90%, + Seasonal for BOTH!)
     def map_season(m):
         if m in [3, 4, 5]: return "Summer (Mar-May)"
         if m in [6, 7, 8, 9]: return "Monsoon (Jun-Sep)"
@@ -1033,25 +1083,47 @@ if __name__ == "__main__":
 
     te_seasons = ds["te_meta"]["Month"].apply(map_season).values
     yt_flat = y_te_inv.ravel()
-    sea_rows = []
-    for m_name, r_obj in cp_store_pt3.items():
-        row = {"Method": m_name, "Overall_PICP_%": r_obj["PICP_%"], "Overall_Width_MW": r_obj["Mean_Width_MW"], "Winkler_MW": r_obj["Winkler_MW"]}
-        for sea, short in [("Winter (Dec-Feb)", "Winter"), ("Post-Monsoon (Oct-Nov)", "PostMon"), ("Monsoon (Jun-Sep)", "Monsoon"), ("Summer (Mar-May)", "Summer")]:
-            ms = te_seasons == sea
-            row[f"{short}_PICP_%"] = float(np.mean((yt_flat[ms] >= r_obj["lo"][ms]) & (yt_flat[ms] <= r_obj["hi"][ms])) * 100.0)
-            row[f"{short}_Width_MW"] = float(np.mean(r_obj["hi"][ms] - r_obj["lo"][ms]))
-        sea_rows.append(row)
+    cp_rows, sea_rows = [], []
+    cp_store_pt3 = {}
+    for m_lbl, vc_pred, te_pred in [
+        ("PatchTST-CM (3x)", mean_vc_pt3, mean_preds["PatchTST-CM (3x)"]),
+        ("Ridge (14xF)", p_ridge_vc, p_ridge_te),
+    ]:
+        for alpha in [0.20, 0.10]:
+            res_list = run_5way_conformal(m_lbl, y_va_cal_inv, vc_pred, y_te_inv, te_pred, alpha)
+            for r in res_list:
+                cp_rows.append({k: v for k, v in r.items() if k not in ("lo", "hi")})
+                if alpha == 0.10:
+                    if m_lbl == "PatchTST-CM (3x)":
+                        cp_store_pt3[r["Method"]] = r
+                    srow = {
+                        "Model": m_lbl, "Method": r["Method"],
+                        "Overall_PICP_%": r["PICP_%"], "Overall_CI_hw": r["PICP_CI_hw"],
+                        "Overall_Width_MW": r["Mean_Width_MW"], "Winkler_MW": r["Winkler_MW"],
+                    }
+                    for sea, short in [("Winter (Dec-Feb)", "Winter"), ("Post-Monsoon (Oct-Nov)", "PostMon"),
+                                       ("Monsoon (Jun-Sep)", "Monsoon"), ("Summer (Mar-May)", "Summer")]:
+                        ms = te_seasons == sea
+                        cov_s = (yt_flat[ms] >= r["lo"][ms]) & (yt_flat[ms] <= r["hi"][ms])
+                        _, _, hw_s = block_bootstrap_picp_ci(cov_s, block_len=7, n_boot=1000, seed=42)
+                        srow[f"{short}_PICP_%"] = float(np.mean(cov_s) * 100.0)
+                        srow[f"{short}_CI_hw"] = hw_s
+                        srow[f"{short}_Width_MW"] = float(np.mean(r["hi"][ms] - r["lo"][ms]))
+                    sea_rows.append(srow)
+    df_cp = pd.DataFrame(cp_rows)
     df_cp_sea = pd.DataFrame(sea_rows)
-    print("\n=== 5. SEASONAL 90% CONFORMAL COVERAGE & WIDTH (PATCHTST-3x) ===")
-    print(df_cp_sea.round(1).to_string(index=False))
+    print("\n=== 4. 5-WAY CONFORMAL ABLATION (BOTH MODELS, 80% & 90%, WITH BLOCK-BOOTSTRAP 95% CIs) ===")
+    print(df_cp[["Model", "Method", "Nominal_%", "Mean_Width_MW", "PICP_%", "PICP_CI_hw", "Winkler_MW"]].round(2).to_string(index=False))
+    print("\n=== 5. SEASONAL 90% CONFORMAL COVERAGE + 95% BLOCK-BOOTSTRAP +/-pp CIs (BOTH MODELS) ===")
+    print(df_cp_sea[["Model", "Method", "Overall_PICP_%", "Overall_CI_hw", "Winter_PICP_%", "Winter_CI_hw", "PostMon_PICP_%", "Monsoon_PICP_%", "Summer_PICP_%", "Summer_CI_hw", "Summer_Width_MW"]].round(1).to_string(index=False))
 
-    # Direct Group Permutation Importance on deployed PatchTST-Ensemble (3x) (MERGED load history block!)
-    print("\nComputing Direct Group Permutation Importance on PatchTST-Ensemble (3x)...", flush=True)
+    # 6. Direct Group Permutation Importance on PatchTST-CM (3x)
+    print("\nComputing Direct Group Permutation Importance on PatchTST-CM (3x)...", flush=True)
     df_perm = compute_patchtst3_group_permutation_importance(seed0_pt3_models, X_te, y_te_inv, sy, ds["feat_names"], n_repeats=15, seed=42)
     print(df_perm.round(2).to_string(index=False))
 
-    # Validation-First 5-Seed Feature & PCA Ablation on PatchTST-Ensemble (3x) AND Ridge!
-    print("\nRunning Validation-First 5-Seed Feature Ablation on PatchTST-Ensemble (3x) & Ridge...", flush=True)
+    # 7. Architecture-Dependent 5-Seed Feature & PCA Ablation (PatchTST-CM 3x + Equal-Weight RNN + Ridge!)
+    print("\nRunning 5-Seed Feature & PCA Ablation on PatchTST-CM (3x), Equal-Weight RNN, & Ridge...", flush=True)
     ablation_configs = [
         ("1. Base (No CDD_25, No Eid Flags)", dict(use_cdd=False, use_eid=False, use_pca=False)),
         ("2. + Detrended CDD_25", dict(use_cdd=True, use_eid=False, use_pca=False)),
@@ -1059,12 +1131,14 @@ if __name__ == "__main__":
         ("4. Full + PCA (95% Variance)", dict(use_cdd=True, use_eid=True, use_pca=True)),
     ]
     hol_mask = (ds["te_meta"]["Holiday_cat"].values > 0)
-    abl_rows, abl_seed_maes = [], {}
+    abl_rows, abl_pt3_seeds, abl_rnn_seeds = [], {}, {}
     for label, cfg in ablation_configs:
         if cfg == dict(use_cdd=True, use_eid=True, use_pca=False):
-            vc_maes = [float(mean_absolute_error(y_va_cal_inv, seed_val_cal_preds[s]["PatchTST-Ensemble (3x)"])) for s in SEEDS]
-            te_maes = [float(mean_absolute_error(y_te_inv, seed_preds[s]["PatchTST-Ensemble (3x)"])) for s in SEEDS]
-            hol_maes = [float(mean_absolute_error(y_te_inv[hol_mask], seed_preds[s]["PatchTST-Ensemble (3x)"][hol_mask])) for s in SEEDS]
+            vc_pt = [float(mean_absolute_error(y_va_cal_inv, seed_val_cal_preds[s]["PatchTST-CM (3x)"])) for s in SEEDS]
+            te_pt = [float(mean_absolute_error(y_te_inv, seed_preds[s]["PatchTST-CM (3x)"])) for s in SEEDS]
+            hol_pt = [float(mean_absolute_error(y_te_inv[hol_mask], seed_preds[s]["PatchTST-CM (3x)"][hol_mask])) for s in SEEDS]
+            vc_rnn = [float(mean_absolute_error(y_va_cal_inv, seed_val_cal_preds[s]["Equal-Weight RNN Ens"])) for s in SEEDS]
+            te_rnn = [float(mean_absolute_error(y_te_inv, seed_preds[s]["Equal-Weight RNN Ens"])) for s in SEEDS]
             r_vc_mae = float(mean_absolute_error(y_va_cal_inv, p_ridge_vc))
             r_te_mae = float(mean_absolute_error(y_te_inv, p_ridge_te))
             dims = ds["n_features"]
@@ -1072,42 +1146,56 @@ if __name__ == "__main__":
             dsi = prepare_dataset(**cfg, tau_override=ds["tau_star"])
             dims = dsi["n_features"]
             hm = (dsi["te_meta"]["Holiday_cat"].values > 0)
-            p_rv, p_rt, _, _, _ = run_ridge_baseline(
+            p_rv, p_rt, _, _, _, _ = run_ridge_baseline(
                 dsi["X_tr"].reshape(len(dsi["X_tr"]), -1), dsi["y_tr"],
                 dsi["X_va_es"].reshape(len(dsi["X_va_es"]), -1), dsi["y_va_es"],
                 dsi["X_va_cal"].reshape(len(dsi["X_va_cal"]), -1), dsi["X_te"].reshape(len(dsi["X_te"]), -1), dsi["sy"]
             )
             r_vc_mae = float(mean_absolute_error(dsi["y_va_cal_inv"], p_rv))
             r_te_mae = float(mean_absolute_error(dsi["y_te_inv"], p_rt))
-            vc_maes, te_maes, hol_maes = [], [], []
+            vc_pt, te_pt, hol_pt, vc_rnn, te_rnn = [], [], [], [], []
             for s in SEEDS:
                 v_l, t_l = [], []
                 for off in [0, 1000, 2000]:
-                    m, _, _ = train_torch_model(PatchTSTModel(dims), dsi["X_tr"], dsi["y_tr"], dsi["X_va_es"], dsi["y_va_es"], s + off, lr=tuned_lrs["PatchTST"])
+                    m, _, _ = train_torch_model(PatchTSTCMModel(dims), dsi["X_tr"], dsi["y_tr"], dsi["X_va_es"], dsi["y_va_es"], s + off, lr=tuned_lrs["PatchTST-CM (Single)"])
                     v_l.append(dsi["sy"].inverse_transform(predict_torch(m, dsi["X_va_cal"])))
                     t_l.append(dsi["sy"].inverse_transform(predict_torch(m, dsi["X_te"])))
                 pv, pt = np.mean(v_l, axis=0), np.mean(t_l, axis=0)
-                vc_maes.append(float(mean_absolute_error(dsi["y_va_cal_inv"], pv)))
-                te_maes.append(float(mean_absolute_error(dsi["y_te_inv"], pt)))
-                hol_maes.append(float(mean_absolute_error(dsi["y_te_inv"][hm], pt[hm])))
-        abl_seed_maes[label] = te_maes
+                vc_pt.append(float(mean_absolute_error(dsi["y_va_cal_inv"], pv)))
+                te_pt.append(float(mean_absolute_error(dsi["y_te_inv"], pt)))
+                hol_pt.append(float(mean_absolute_error(dsi["y_te_inv"][hm], pt[hm])))
+
+                rv_l, rt_l = [], []
+                for nm, fn in [("BiGRU", lambda: BiGRUModel(dims)), ("BiLSTM-Attention", lambda: BiLSTMAttnModel(dims)), ("BiLSTM", lambda: BiLSTMModel(dims))]:
+                    mrn, _, _ = train_torch_model(fn(), dsi["X_tr"], dsi["y_tr"], dsi["X_va_es"], dsi["y_va_es"], s, lr=tuned_lrs[nm])
+                    rv_l.append(dsi["sy"].inverse_transform(predict_torch(mrn, dsi["X_va_cal"])))
+                    rt_l.append(dsi["sy"].inverse_transform(predict_torch(mrn, dsi["X_te"])))
+                vc_rnn.append(float(mean_absolute_error(dsi["y_va_cal_inv"], np.mean(rv_l, axis=0))))
+                te_rnn.append(float(mean_absolute_error(dsi["y_te_inv"], np.mean(rt_l, axis=0))))
+        abl_pt3_seeds[label] = te_pt
+        abl_rnn_seeds[label] = te_rnn
         abl_rows.append({
             "Config": label, "Dims": dims,
-            "PT3_ValCal_MAE": float(np.mean(vc_maes)),
-            "PT3_Test_MAE": float(np.mean(te_maes)), "PT3_Test_SD": float(np.std(te_maes, ddof=1)),
-            "PT3_Hol_MAE": float(np.mean(hol_maes)),
+            "PT3_ValCal_MAE": float(np.mean(vc_pt)),
+            "PT3_Test_MAE": float(np.mean(te_pt)), "PT3_Test_SD": float(np.std(te_pt, ddof=1)),
+            "PT3_Hol_MAE": float(np.mean(hol_pt)),
+            "EqRNN_ValCal_MAE": float(np.mean(vc_rnn)),
+            "EqRNN_Test_MAE": float(np.mean(te_rnn)), "EqRNN_Test_SD": float(np.std(te_rnn, ddof=1)),
             "Ridge_ValCal_MAE": r_vc_mae, "Ridge_Test_MAE": r_te_mae,
         })
     df_abl = pd.DataFrame(abl_rows)
-    base_vec = np.array(abl_seed_maes[ablation_configs[0][0]])
-    df_abl["p_paired_vs_Base"] = [1.0] + [float(stats.ttest_rel(abl_seed_maes[lbl], base_vec)[1]) for lbl, _ in ablation_configs[1:]]
-    print("\n=== 6. VALIDATION-FIRST 5-SEED ABLATION (PATCHTST-3x & RIDGE) ===")
+    base_pt = np.array(abl_pt3_seeds[ablation_configs[0][0]])
+    base_rnn = np.array(abl_rnn_seeds[ablation_configs[0][0]])
+    df_abl["PT3_p_vs_Base"] = [1.0] + [float(stats.ttest_rel(abl_pt3_seeds[lbl], base_pt)[1]) for lbl, _ in ablation_configs[1:]]
+    df_abl["EqRNN_p_vs_Base"] = [1.0] + [float(stats.ttest_rel(abl_rnn_seeds[lbl], base_rnn)[1]) for lbl, _ in ablation_configs[1:]]
+    print("\n=== 6. ARCHITECTURE-DEPENDENT 5-SEED ABLATION (PATCHTST-CM, EQ-RNN, RIDGE) ===")
     print(df_abl.round(3).to_string(index=False))
 
-    # Regime & Demand-Bin Stratification (including PatchTST-3x, Ridge, Eq-Weight RNN, XGB-Diff, Wkday Persist!)
+    # 8. Regimes, Holiday/Eid Paired Tests, and Lagged-Demand (y_{t-1}) Bins (NO realized-target selection bias!)
     te_m = ds["te_meta"].copy()
     te_m["Actual"] = y_te_inv.ravel()
-    te_m["Pred_PT3"] = mean_preds["PatchTST-Ensemble (3x)"].ravel()
+    te_m["Lag1_Demand"] = ds["y_te_lag1"].ravel()
+    te_m["Pred_PT3"] = mean_preds["PatchTST-CM (3x)"].ravel()
     te_m["Pred_Ridge"] = mean_preds["Ridge (14xF)"].ravel()
     te_m["Pred_EqRNN"] = mean_preds["Equal-Weight RNN Ens"].ravel()
     te_m["Pred_XGBD"] = mean_preds["XGBoost-Diff (Δy)"].ravel()
@@ -1133,14 +1221,32 @@ if __name__ == "__main__":
             })
     df_reg = pd.DataFrame(regime_rows)
 
+    # Paired HLN-DM tests on Holiday / Eid subset (n = 41, Ref = Ridge)
+    g_hol = te_m[te_m["Cal_Regime"] == "Holiday / Eid"]
+    hol_test_rows = []
+    for lbl, col in [("PatchTST-CM (3x)", "Pred_PT3"), ("Equal-Weight RNN Ens", "Pred_EqRNN"),
+                     ("XGBoost-Diff (Δy)", "Pred_XGBD"), ("Weekday-Adj Persistence", "Pred_Wkday")]:
+        dm_h, p_h, d_h, lo_h, hi_h = dm_hln_and_bootstrap(
+            g_hol["Actual"].values, g_hol["Pred_Ridge"].values, g_hol[col].values, max_lag=5, block_len=3
+        )
+        hol_test_rows.append({
+            "Comparison": f"Ridge vs {lbl}", "N": len(g_hol), "Ridge_MAE": float(mean_absolute_error(g_hol["Actual"], g_hol["Pred_Ridge"])),
+            "Other_MAE": float(mean_absolute_error(g_hol["Actual"], g_hol[col])),
+            "Delta_MW": d_h, "CI_lo": lo_h, "CI_hi": hi_h, "DM_HLN": dm_h, "p_val": p_h,
+        })
+    df_hol_tests = pd.DataFrame(hol_test_rows)
+    print("\n=== 7A. HOLIDAY / EID PAIRED TESTS (n=41, REF=RIDGE) ===")
+    print(df_hol_tests.round(3).to_string(index=False))
+
+    # Stratify Table 13 by KNOWN lagged peak demand y_{t-1} (eliminates target-selection bias!)
     bins = [0, 11000, 13000, 15000, 25000]
     bin_labels = ["Low (<11 GW)", "Moderate (11-13 GW)", "High (13-15 GW)", "Extreme Peak (>15 GW)"]
-    te_m["Bin"] = pd.cut(te_m["Actual"], bins=bins, labels=bin_labels)
+    te_m["Lag1_Bin"] = pd.cut(te_m["Lag1_Demand"], bins=bins, labels=bin_labels)
     bin_rows = []
     for lbl in bin_labels:
-        g = te_m[te_m["Bin"] == lbl]
+        g = te_m[te_m["Lag1_Bin"] == lbl]
         bin_rows.append({
-            "Demand_Bin": lbl, "N": len(g),
+            "Lag1_Demand_Bin": lbl, "N": len(g),
             "PT3_MAE": float(mean_absolute_error(g["Actual"], g["Pred_PT3"])),
             "Ridge_MAE": float(mean_absolute_error(g["Actual"], g["Pred_Ridge"])),
             "EqRNN_MAE": float(mean_absolute_error(g["Actual"], g["Pred_EqRNN"])),
@@ -1149,171 +1255,248 @@ if __name__ == "__main__":
             "Wkday_MAE": float(mean_absolute_error(g["Actual"], g["Pred_Wkday"])),
         })
     df_bins = pd.DataFrame(bin_rows)
-    print("\n=== 7. REGIME & DEMAND-BIN BREAKDOWN ===")
-    print(df_reg.round(1).to_string(index=False))
+    print("\n=== 7B. LAGGED-DEMAND (y_{t-1}) BINS (NO REALIZED-TARGET SELECTION BIAS) ===")
     print(df_bins.round(1).to_string(index=False))
 
+    # 9. Gap-Handling Audit (420 Gap-Free vs 42 Gap-Spanning Test Windows)
+    gspan = ds["te_gap_span"]
+    gap_rows = []
+    for grp_lbl, mask in [("Gap-Free Windows (cal span = 14d)", ~gspan), ("Gap-Spanning Windows (cal span > 14d)", gspan)]:
+        gap_rows.append({
+            "Subset": grp_lbl, "N": int(mask.sum()),
+            "PT3_MAE": float(mean_absolute_error(y_te_inv[mask], mean_preds["PatchTST-CM (3x)"][mask])),
+            "Ridge_MAE": float(mean_absolute_error(y_te_inv[mask], mean_preds["Ridge (14xF)"][mask])),
+            "EqRNN_MAE": float(mean_absolute_error(y_te_inv[mask], mean_preds["Equal-Weight RNN Ens"][mask])),
+            "Wkday_MAE": float(mean_absolute_error(y_te_inv[mask], mean_preds["Weekday-Adj Persistence"][mask])),
+            "Lag7_MAE": float(mean_absolute_error(y_te_inv[mask], mean_preds["Seasonal Naive (Lag-7)"][mask])),
+        })
+    df_gap = pd.DataFrame(gap_rows)
+    print("\n=== 8. CALENDAR-GAP SENSITIVITY AUDIT (420 CLEAN vs 42 GAP-SPANNING TEST WINDOWS) ===")
+    print(df_gap.round(1).to_string(index=False))
+
+    # 10. Eid +/-1-Day Lunar-Sighting Jitter Sensitivity Test (Frozen Seed-42 Trained Models!)
+    jitter_rows = []
+    for shift in [-1, 0, +1]:
+        if shift == 0:
+            X_jit = X_te
+        else:
+            ds_j = prepare_dataset(use_cdd=True, use_eid=True, use_pca=False, tau_override=ds["tau_star"], eid_jitter_test=shift)
+            X_jit = ds_j["X_te"]
+        X_jit_2d = X_jit.reshape(len(X_jit), -1)
+        p_pt_j = np.mean([sy.inverse_transform(predict_torch(m, X_jit)) for m in seed0_pt3_models], axis=0)
+        p_rnn_j = np.mean([sy.inverse_transform(predict_torch(m, X_jit)) for m in seed0_rnn_models], axis=0)
+        p_rid_j = sy.inverse_transform(ridge_mod.predict(X_jit_2d).reshape(-1, 1))
+        jitter_rows.append({
+            "Eid_Shift_Days": shift,
+            "PT3_All_MAE": float(mean_absolute_error(y_te_inv, p_pt_j)),
+            "PT3_Hol_MAE": float(mean_absolute_error(y_te_inv[hol_mask], p_pt_j[hol_mask])),
+            "Ridge_All_MAE": float(mean_absolute_error(y_te_inv, p_rid_j)),
+            "Ridge_Hol_MAE": float(mean_absolute_error(y_te_inv[hol_mask], p_rid_j[hol_mask])),
+            "EqRNN_All_MAE": float(mean_absolute_error(y_te_inv, p_rnn_j)),
+            "EqRNN_Hol_MAE": float(mean_absolute_error(y_te_inv[hol_mask], p_rnn_j[hol_mask])),
+        })
+    df_jitter = pd.DataFrame(jitter_rows)
+    print("\n=== 9. EID +/-1-DAY LUNAR-SIGHTING JITTER SENSITIVITY (FROZEN SEED-42 MODELS) ===")
+    print(df_jitter.round(1).to_string(index=False))
+
+    # 11. Summer-Inclusive Validation Sensitivity Check (Tune on Full-Year 2024 vs Default Summer-Free Val-ES)
+    df_enc_full = ds["df_enc"]
+    tr23 = df_enc_full.loc[: "2023-12-31"]
+    va24 = df_enc_full.loc["2024-01-01" : "2024-12-31"]  # Includes full Summer 2024!
+    sx24 = MinMaxScaler().fit(tr23[ds["cont_cols"]])
+    sy24 = MinMaxScaler().fit(tr23[["Max. Demand at eve. peak (Generation end)"]])
+    def pack24(sub):
+        return np.concatenate([sx24.transform(sub[ds["cont_cols"]]), sub[ds["cat_onehot_cols"]].values.astype(np.float32),
+                               sy24.transform(sub[["Max. Demand at eve. peak (Generation end)"]])], axis=1)
+    X_tr23, y_tr23 = windowing(pack24(tr23), pack24(tr23)[:, -1], HIST_SIZE)
+    X_va24, y_va24 = windowing(pack24(va24), pack24(va24)[:, -1], HIST_SIZE)
+    # Tune Ridge alpha on full-year 2024 (summer-inclusive!)
+    best_a24, best_m24 = 10.0, float("inf")
+    for a in [0.1, 1.0, 10.0, 50.0, 100.0, 300.0, 1000.0, 3000.0]:
+        m24 = Ridge(alpha=a).fit(X_tr23.reshape(len(X_tr23), -1), y_tr23.ravel())
+        mae24 = mean_absolute_error(y_va24.ravel(), m24.predict(X_va24.reshape(len(X_va24), -1)))
+        if mae24 < best_m24: best_m24, best_a24 = mae24, a
+    # Evaluate Ridge with alpha_2024 on standard Train -> 2025-26 Test
+    p_rid_a24 = sy.inverse_transform(Ridge(alpha=best_a24).fit(X_tr_2d, y_tr.ravel()).predict(X_te_2d).reshape(-1, 1))
+    # Tune PatchTST-CM LR on full-year 2024 (summer-inclusive!)
+    best_lr24, best_vl24 = 1e-3, float("inf")
+    for lr_c in [1e-3, 2.5e-3]:
+        _, _, vl24 = train_torch_model(PatchTSTCMModel(n_f), X_tr23, y_tr23, X_va24, y_va24, 42, lr=lr_c)
+        if vl24 < best_vl24: best_vl24, best_lr24 = vl24, lr_c
+    # Evaluate PatchTST-CM (3x, Seed 42) with lr_2024 on standard Train -> 2025-26 Test
+    if best_lr24 == tuned_lrs["PatchTST-CM (Single)"]:
+        pt_a24_mae = float(mean_absolute_error(y_te_inv, seed_preds[42]["PatchTST-CM (3x)"]))
+    else:
+        pt_l24 = []
+        for off in [0, 1000, 2000]:
+            m24p, _, _ = train_torch_model(PatchTSTCMModel(n_f), X_tr, y_tr, X_va_es, y_va_es, 42 + off, lr=best_lr24)
+            pt_l24.append(sy.inverse_transform(predict_torch(m24p, X_te)))
+        pt_a24_mae = float(mean_absolute_error(y_te_inv, np.mean(pt_l24, axis=0)))
+    df_val_sens = pd.DataFrame([
+        {"Model": "Ridge (14xF)", "ValES_Param": f"alpha={ridge_alpha:g}", "ValES_Test_MAE": float(mean_absolute_error(y_te_inv, p_ridge_te)),
+         "Year2024_Param": f"alpha={best_a24:g}", "Year2024_Test_MAE": float(mean_absolute_error(y_te_inv, p_rid_a24))},
+        {"Model": "PatchTST-CM (3x, S42)", "ValES_Param": f"lr={tuned_lrs['PatchTST-CM (Single)']:g}", "ValES_Test_MAE": float(mean_absolute_error(y_te_inv, seed_preds[42]["PatchTST-CM (3x)"])),
+         "Year2024_Param": f"lr={best_lr24:g}", "Year2024_Test_MAE": pt_a24_mae},
+    ])
+    print("\n=== 10. SUMMER-INCLUSIVE VALIDATION SENSITIVITY (FULL-YEAR 2024 vs JUL-NOV VAL-ES) ===")
+    print(df_val_sens.round(2).to_string(index=False))
+
     # ==========================================================================
-    # REGENERATE CLEAN, ZERO-OVERLAP VECTOR PDF FIGURES
+    # REGENERATE ZERO-OVERLAP VECTOR PDF FIGURES
     # ==========================================================================
     plt.rcParams.update({"font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9})
 
-    # Fig 1: Forecast comparison (Tied Leading Group: PatchTST-3x, Ridge, Equal-Weight RNN)
+    # Fig 1: Forecast comparison
     fig, ax = plt.subplots(figsize=(10.2, 4.2))
     ax.plot(ds["te_dates"], y_te_inv, color="#111111", lw=1.35, label="Actual Peak Demand")
-    ax.plot(ds["te_dates"], mean_preds["PatchTST-Ensemble (3x)"], color="#0d9488", lw=1.25, label="PatchTST-3×")
+    ax.plot(ds["te_dates"], mean_preds["PatchTST-CM (3x)"], color="#0d9488", lw=1.25, label="PatchTST-CM (3×)")
     ax.plot(ds["te_dates"], mean_preds["Ridge (14xF)"], color="#d97706", lw=1.1, ls="--", alpha=0.85, label="Ridge (14×F)")
     ax.plot(ds["te_dates"], mean_preds["Equal-Weight RNN Ens"], color="#1d3557", lw=1.1, ls="-.", alpha=0.85, label="Equal-Weight RNN Ens")
     ax.set_ylabel("Peak Demand (MW)")
-    ax.set_title("National Evening Peak Demand — Leading Group Comparison (462 Blind Test Days)", pad=28)
+    ax.set_title("National Evening Peak Demand — Representative Models (462 Blind Test Days)", pad=28)
     ax.grid(alpha=0.25)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False, fontsize=8.2)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig1_forecast_comparison.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 2: Convergence curves (8 neural families)
-    fig, ax = plt.subplots(figsize=(8.6, 4.7))
-    colors = {"DLinear (CI)": "#6d597a", "MLP (14xF)": "#84a98c", "PatchTST": "#0284c7", "BiGRU": "#1d3557",
-              "BiLSTM": "#d97706", "BiLSTM-Attention": "#2a9d8f", "Transformer": "#e76f51", "CNN-BiGRU-Transformer": "#9b2226"}
+    # Fig 2: Convergence curves
+    fig, ax = plt.subplots(figsize=(8.8, 4.7))
+    colors = {"DLinear (CI)": "#6d597a", "MLP (14xF)": "#84a98c", "PatchTST-CM (Single)": "#0284c7",
+              "PatchTST-RevIN (Single)": "#14b8a6", "BiGRU": "#1d3557", "BiLSTM": "#d97706",
+              "BiLSTM-Attention": "#2a9d8f", "Transformer": "#e76f51", "CNN-BiGRU-Transformer": "#9b2226"}
     for name, hlist in val_histories.items():
         max_len = max(len(h) for h in hlist)
         padded = np.array([h + [h[-1]] * (max_len - len(h)) for h in hlist])
         mu, sd = padded.mean(axis=0), padded.std(axis=0)
         ep = np.arange(1, max_len + 1)
-        ax.plot(ep, mu, lw=1.6, color=colors[name], label=name)
-        ax.fill_between(ep, mu - sd, mu + sd, color=colors[name], alpha=0.10)
+        ax.plot(ep, mu, lw=1.5, color=colors[name], label=name)
+        ax.fill_between(ep, mu - sd, mu + sd, color=colors[name], alpha=0.09)
     ax.set_xlabel("Epoch"); ax.set_ylabel("Val-ES Loss (Normalized MAE)")
-    ax.set_title("Multi-Seed Val-ES Convergence Across Neural Families (Mean ± 1 SD, 5 Seeds)", pad=38)
+    ax.set_title("Multi-Seed Val-ES Convergence Across Neural Families (Mean ± 1 SD, 5 Seeds)", pad=58)
     ax.grid(alpha=0.25)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=4, frameon=False, fontsize=7.6)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=False, fontsize=7.4)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig2_convergence_curves.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 3: HLN-DM Forest Plot (Ref = PatchTST-Ensemble 3x!)
-    fig, ax = plt.subplots(figsize=(9.0, 6.2))
+    # Fig 3: Descriptive HLN-DM Forest Plot (Ref = PatchTST-CM 3x)
+    fig, ax = plt.subplots(figsize=(9.2, 6.4))
     y_pos = np.arange(len(df_dm))
     c_bars = ["#0d9488" if p < 0.01 else ("#2563eb" if p < 0.05 else "#94a3b8") for p in df_dm["Ens5_p_holm"]]
     ax.axvline(0, color="black", ls="--", lw=1.0)
     for i, (_, r) in enumerate(df_dm.iterrows()):
         ax.plot([r["Ens5_CI_lo"], r["Ens5_CI_hi"]], [i, i], color=c_bars[i], lw=2.1)
         ax.plot(r["Ens5_Delta_MW"], i, "o", color=c_bars[i], ms=5.2)
-    ax.set_yticks(y_pos); ax.set_yticklabels(df_dm["Comparator"], fontsize=8.0)
-    ax.set_xlabel("ΔMAE: PatchTST-Ensemble (3×) − Comparator (MW)  [Negative = PatchTST-3× Lower Error]")
-    ax.set_title("HLN-Adjusted Diebold–Mariano Tests (Ref: PatchTST-3×; Holm–Bonferroni Adjusted)", pad=28)
+    ax.set_yticks(y_pos); ax.set_yticklabels(df_dm["Comparator"], fontsize=7.9)
+    ax.set_xlabel("ΔMAE: PatchTST-CM (3×) − Comparator (MW)  [Negative = PatchTST-CM Lower Error]")
+    ax.set_title("Descriptive HLN-Adjusted Diebold–Mariano Tests (Ref: PatchTST-CM 3×; Holm–Bonferroni)", pad=28)
     ax.grid(axis="x", alpha=0.25)
-    p1 = mpatches.Patch(color="#0d9488", label="p_Holm < 0.01")
-    p2 = mpatches.Patch(color="#2563eb", label="p_Holm < 0.05")
-    p3 = mpatches.Patch(color="#94a3b8", label="p_Holm ≥ 0.05 (Tied / ns)")
-    ax.legend(handles=[p1, p2, p3], loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False, fontsize=8.0)
+    ax.legend(handles=[
+        mpatches.Patch(color="#0d9488", label="p_Holm < 0.01"),
+        mpatches.Patch(color="#2563eb", label="p_Holm < 0.05"),
+        mpatches.Patch(color="#94a3b8", label="Not significant (p_Holm ≥ 0.05)"),
+    ], loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False, fontsize=8.0)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig3_dm_forest.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 4: Feature Ablation (PatchTST-3x & Ridge) & Seasonal Regime Breakdown
-    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.5))
-    ax = axes[0]
-    short_lbl = ["Base", "+CDD_25", "+Eid Flags\n(Full)", "Full + PCA\n(95%)"]
-    x_a = np.arange(len(short_lbl)); wa = 0.34
-    ax.bar(x_a - wa/2, df_abl["PT3_Test_MAE"], yerr=df_abl["PT3_Test_SD"], capsize=3.5, width=wa, color="#0d9488", label="PatchTST-3× (5-Seed)")
-    ax.bar(x_a + wa/2, df_abl["Ridge_Test_MAE"], width=wa, color="#d97706", label="Ridge (14×F)")
-    for i, r in df_abl.iterrows():
-        ax.text(i - wa/2, r["PT3_Test_MAE"] + r["PT3_Test_SD"] + 8, f"{r['PT3_Test_MAE']:.0f}", ha="center", fontsize=7.5, color="#0f766e")
-        ax.text(i + wa/2, r["Ridge_Test_MAE"] + 8, f"{r['Ridge_Test_MAE']:.0f}", ha="center", fontsize=7.5, color="#b45309")
-    ax.set_xticks(x_a); ax.set_xticklabels(short_lbl, fontsize=8.3)
-    ax.set_ylabel("Blind Test MAE (MW)")
-    ax.set_ylim(0, max(df_abl["PT3_Test_MAE"].max(), df_abl["Ridge_Test_MAE"].max()) * 1.18)
-    ax.set_title("(a) Validation-First Feature & PCA Ablation", pad=28)
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False, fontsize=7.8)
+    # Fig 4: Architecture-Dependent Ablation (PT3 + Eq-RNN + Ridge) + Regime Comparison
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.6))
+    short_lbl = ["1. Base", "2. +CDD₂₅", "3. +Eid (Full)", "4. +PCA (95%)"]
+    xa = np.arange(len(short_lbl)); wa = 0.25
+    axes[0].bar(xa - wa, df_abl["PT3_Test_MAE"], yerr=df_abl["PT3_Test_SD"], capsize=3, width=wa, color="#0d9488", label="PatchTST-CM (3×)")
+    axes[0].bar(xa, df_abl["EqRNN_Test_MAE"], yerr=df_abl["EqRNN_Test_SD"], capsize=3, width=wa, color="#1d3557", label="Eq-Wt RNN Ens")
+    axes[0].bar(xa + wa, df_abl["Ridge_Test_MAE"], width=wa, color="#d97706", label="Ridge (14×F)")
+    axes[0].set_xticks(xa); axes[0].set_xticklabels(short_lbl, fontsize=8.3)
+    axes[0].set_ylabel("Blind Test MAE (MW)"); axes[0].set_ylim(500, max(df_abl["PT3_Test_MAE"].max(), df_abl["EqRNN_Test_MAE"].max()) + 65)
+    axes[0].set_title("(a) Architecture-Dependent Feature & PCA Ablation (5 Seeds)", pad=32)
+    axes[0].grid(axis="y", alpha=0.25)
+    axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False, fontsize=7.6)
 
-    ax = axes[1]
-    s_reg = df_reg[df_reg["Axis"] == "Season"]
-    x = np.arange(len(s_reg)); w = 0.19
-    ax.bar(x - 1.5*w, s_reg["Wkday_MAE"], width=w, color="#94a3b8", label="Wkday Persist")
-    ax.bar(x - 0.5*w, s_reg["Ridge_MAE"], width=w, color="#d97706", label="Ridge (14×F)")
-    ax.bar(x + 0.5*w, s_reg["EqRNN_MAE"], width=w, color="#1d3557", label="Eq-Wt RNN Ens")
-    ax.bar(x + 1.5*w, s_reg["PT3_MAE"], width=w, color="#0d9488", label="PatchTST-3×")
-    ax.set_xticks(x); ax.set_xticklabels([s.split(" ")[0] for s in s_reg["Regime"]], fontsize=8.5)
-    ax.set_ylabel("Blind Test MAE (MW)")
-    ax.set_ylim(0, s_reg[["Wkday_MAE", "Ridge_MAE", "EqRNN_MAE", "PT3_MAE"]].values.max() * 1.15)
-    ax.set_title("(b) Seasonal Regime Error Breakdown", pad=28)
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False, fontsize=7.4)
+    cal_df = df_reg[df_reg["Axis"] == "Cal_Regime"].set_index("Regime").loc[["Working Weekday", "Weekend (Fri-Sat)", "Holiday / Eid"]]
+    xc = np.arange(len(cal_df)); w = 0.20
+    axes[1].bar(xc - 1.5*w, cal_df["Wkday_MAE"], width=w, color="#94a3b8", label="Wkday Persist.")
+    axes[1].bar(xc - 0.5*w, cal_df["Ridge_MAE"], width=w, color="#d97706", label="Ridge (14×F)")
+    axes[1].bar(xc + 0.5*w, cal_df["EqRNN_MAE"], width=w, color="#1d3557", label="Eq-Wt RNN")
+    axes[1].bar(xc + 1.5*w, cal_df["PT3_MAE"], width=w, color="#0d9488", label="PatchTST-CM (3×)")
+    axes[1].set_xticks(xc); axes[1].set_xticklabels(["Working\nWeekday", "Weekend\n(Fri–Sat)", "Holiday / Eid\n(n=41)"], fontsize=8.3)
+    axes[1].set_ylabel("Blind Test MAE (MW)"); axes[1].set_ylim(0, cal_df[["Wkday_MAE", "Ridge_MAE", "EqRNN_MAE", "PT3_MAE"]].values.max() * 1.16)
+    axes[1].set_title("(b) Calendar Regime Error (5-Seed Ensemble Averages)", pad=32)
+    axes[1].grid(axis="y", alpha=0.25)
+    axes[1].legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False, fontsize=7.3)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig4_ablation_regime.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 6: Demand Bins
-    fig, ax = plt.subplots(figsize=(9.4, 4.4))
-    x = np.arange(len(df_bins)); w = 0.15
-    ax.bar(x - 2*w, df_bins["Wkday_MAE"], width=w, color="#94a3b8", label="Wkday Persist")
-    ax.bar(x - w, df_bins["XGB_MAE"], width=w, color="#e76f51", label="XGBoost (Level)")
-    ax.bar(x, df_bins["XGBD_MAE"], width=w, color="#f4a261", label="XGBoost-Diff (Δy)")
-    ax.bar(x + w, df_bins["Ridge_MAE"], width=w, color="#d97706", label="Ridge (14×F)")
-    ax.bar(x + 2*w, df_bins["PT3_MAE"], width=w, color="#0d9488", label="PatchTST-3×")
-    for i, r in df_bins.iterrows():
-        ax.text(i + 2*w, r["PT3_MAE"] + 16, f"{r['PT3_MAE']:.0f}", ha="center", fontsize=7.2, fontweight="bold", color="#0f766e")
-        ax.text(i, r["XGBD_MAE"] + 16, f"{r['XGBD_MAE']:.0f}", ha="center", fontsize=7.0, color="#b45309")
-    ax.set_xticks(x); ax.set_xticklabels([f"{b}\n(n={n})" for b, n in zip(df_bins["Demand_Bin"], df_bins["N"])], fontsize=8.5)
-    ax.set_ylabel("Blind Test MAE (MW)")
-    ax.set_ylim(0, df_bins[["Wkday_MAE", "XGB_MAE", "XGBD_MAE", "Ridge_MAE", "PT3_MAE"]].values.max() * 1.15)
-    ax.set_title("Peak Demand-Level Error Stratification Across Leading Models & Differenced Trees", pad=28)
+    # Fig 6: Lagged-Demand (y_{t-1}) Bins (No Realized-Target Bias!)
+    fig, ax = plt.subplots(figsize=(9.8, 4.4))
+    xb = np.arange(len(df_bins)); wb = 0.16
+    ax.bar(xb - 2*wb, df_bins["XGB_MAE"], width=wb, color="#e76f51", label="XGBoost (Level)")
+    ax.bar(xb - wb, df_bins["XGBD_MAE"], width=wb, color="#f4a261", label="XGBoost-Diff (Δy)")
+    ax.bar(xb, df_bins["Wkday_MAE"], width=wb, color="#94a3b8", label="Wkday Persist.")
+    ax.bar(xb + wb, df_bins["Ridge_MAE"], width=wb, color="#d97706", label="Ridge (14×F)")
+    ax.bar(xb + 2*wb, df_bins["PT3_MAE"], width=wb, color="#0d9488", label="PatchTST-CM (3×)")
+    ax.set_xticks(xb); ax.set_xticklabels([f"{r['Lag1_Demand_Bin']}\n(n={r['N']})" for _, r in df_bins.iterrows()], fontsize=8.5)
+    ax.set_ylabel("Blind Test MAE (MW)"); ax.set_ylim(0, df_bins[["XGB_MAE", "XGBD_MAE", "Wkday_MAE", "Ridge_MAE", "PT3_MAE"]].values.max() * 1.15)
+    ax.set_title("Blind Test Error Stratified by Known Prior-Day Peak Demand y(t−1) (No Target-Selection Bias)", pad=28)
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=5, frameon=False, fontsize=7.6)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig6_demand_bins.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 7: Qualitative events (highlighting Holiday/Eid XGB-Diff strength too!)
-    fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.4))
-    w1_mask = (ds["te_dates"] >= "2025-12-15") & (ds["te_dates"] <= "2026-01-14")
-    w2_mask = (ds["te_dates"] >= "2025-05-20") & (ds["te_dates"] <= "2025-06-19")
-    for ax, mask, title in [
-        (axes[0], w1_mask, "(a) Stable Winter Regime (Dec 2025–Jan 2026)"),
-        (axes[1], w2_mask, "(b) Volatile Summer & Eid-ul-Adha Window (May–Jun 2025)"),
-    ]:
+    # Fig 7: Qualitative High-Stress Events
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 4.3))
+    events = [
+        ("Eid-ul-Fitr 2025", "2025-03-26", "2025-04-08"),
+        ("Eid-ul-Adha 2025", "2025-06-02", "2025-06-15"),
+        ("April 2026 Peak Heatwave", "2026-04-12", "2026-04-30"),
+    ]
+    for ax, (title, s_d, e_d) in zip(axes, events):
+        mask = (ds["te_dates"] >= s_d) & (ds["te_dates"] <= e_d)
         d_sub = ds["te_dates"][mask]
         yt_s = y_te_inv.ravel()[mask]
-        ypt_s = mean_preds["PatchTST-Ensemble (3x)"].ravel()[mask]
+        ypt_s = mean_preds["PatchTST-CM (3x)"].ravel()[mask]
         yr_s = mean_preds["Ridge (14xF)"].ravel()[mask]
         yxd_s = mean_preds["XGBoost-Diff (Δy)"].ravel()[mask]
         ax.plot(d_sub, yt_s, color="#111111", lw=1.7, label="Actual")
-        ax.plot(d_sub, ypt_s, color="#0d9488", lw=1.45, label=f"PatchTST-3× ({mean_absolute_error(yt_s, ypt_s):.0f})")
+        ax.plot(d_sub, ypt_s, color="#0d9488", lw=1.45, label=f"PT-CM(3×) ({mean_absolute_error(yt_s, ypt_s):.0f})")
         ax.plot(d_sub, yr_s, color="#d97706", lw=1.2, ls="-.", label=f"Ridge ({mean_absolute_error(yt_s, yr_s):.0f})")
         ax.plot(d_sub, yxd_s, color="#e76f51", lw=1.1, ls="--", label=f"XGB-Diff ({mean_absolute_error(yt_s, yxd_s):.0f})")
         ax.set_title(title, fontsize=9.3, pad=36)
         ax.set_ylabel("Peak Demand (MW)")
         ax.tick_params(axis="x", rotation=25, labelsize=7.5)
         ax.grid(alpha=0.25)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.5)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, fontsize=7.4)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig7_qualitative_events.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 8: Efficiency Pareto (consistent fp32 KiB & CPU ms)
+    # Fig 8: Efficiency Pareto (Zero Overlap!)
     fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.4))
-    nn_names = ["Ridge (14xF)", "DLinear (CI)", "CNN-BiGRU-Transformer", "PatchTST", "BiLSTM-Attention",
-                "Transformer", "MLP (14xF)", "BiGRU", "BiLSTM", "PatchTST-Ensemble (3x)", "Equal-Weight RNN Ens"]
+    nn_names = ["Ridge (14xF)", "DLinear (CI)", "CNN-BiGRU-Transformer", "PatchTST-CM (Single)",
+                "PatchTST-RevIN (CI, 3x)", "BiLSTM-Attention", "Transformer", "MLP (14xF)", "BiGRU",
+                "BiLSTM", "PatchTST-CM (3x)", "Equal-Weight RNN Ens"]
     pts_x = [eff_profile[m]["Params"] / 1000.0 for m in nn_names]
     pts_y = [float(df_summary.loc[m, "MAE_mean"]) for m in nn_names]
     cols_p = ["#0d9488" if "PatchTST" in m else ("#d97706" if "Ridge" in m else ("#1d3557" if "RNN" in m else "#64748b")) for m in nn_names]
-    sizes_p = [130 if m in ("PatchTST-Ensemble (3x)", "Ridge (14xF)", "Equal-Weight RNN Ens") else 65 for m in nn_names]
+    sizes_p = [130 if m in ("PatchTST-CM (3x)", "Ridge (14xF)", "Equal-Weight RNN Ens") else 65 for m in nn_names]
     axes[0].scatter(pts_x, pts_y, c=cols_p, s=sizes_p, zorder=4, edgecolors="white")
     offsets = {
-        "Ridge (14xF)": (-2, 12), "DLinear (CI)": (10, 4), "CNN-BiGRU-Transformer": (10, 4),
-        "PatchTST": (10, -10), "BiLSTM-Attention": (-42, 9), "Transformer": (10, 4),
-        "MLP (14xF)": (10, -4), "BiGRU": (-12, 10), "BiLSTM": (10, -2),
-        "PatchTST-Ensemble (3x)": (12, 2), "Equal-Weight RNN Ens": (-128, 8)
+        "Ridge (14xF)": (-2, 12), "DLinear (CI)": (4, 10), "CNN-BiGRU-Transformer": (8, -11),
+        "PatchTST-CM (Single)": (-46, -15), "PatchTST-RevIN (CI, 3x)": (10, -10),
+        "BiLSTM-Attention": (-42, 9), "Transformer": (10, 4), "MLP (14xF)": (10, -4),
+        "BiGRU": (-12, 10), "BiLSTM": (10, -2), "PatchTST-CM (3x)": (12, 2), "Equal-Weight RNN Ens": (-128, 8)
     }
     for m, px, py in zip(nn_names, pts_x, pts_y):
         dx, dy = offsets.get(m, (8, 4))
         axes[0].annotate(m, (px, py), xytext=(dx, dy), textcoords="offset points",
-                         fontsize=7.2, fontweight="bold" if m in ("PatchTST-Ensemble (3x)", "Ridge (14xF)", "Equal-Weight RNN Ens") else "normal")
+                         fontsize=7.0, fontweight="bold" if m in ("PatchTST-CM (3x)", "Ridge (14xF)", "Equal-Weight RNN Ens") else "normal")
     axes[0].set_xlabel("Trainable Parameters (Thousands)"); axes[0].set_ylabel("Blind Test MAE (MW)")
     axes[0].set_title("(a) Accuracy vs. Parameter Count (5-Seed)")
     axes[0].set_xlim(-35, 900); axes[0].set_ylim(545, max(pts_y) + 25); axes[0].grid(alpha=0.25)
 
-    lat_models = ["Ridge (14xF)", "DLinear (CI)", "XGBoost-Diff (Δy)", "MLP (14xF)", "LightGBM", "PatchTST",
-                  "Transformer", "BiLSTM", "BiGRU", "BiLSTM-Attention", "PatchTST-Ensemble (3x)", "Equal-Weight RNN Ens"]
+    lat_models = ["Ridge (14xF)", "DLinear (CI)", "XGBoost-Diff (Δy)", "MLP (14xF)", "LightGBM",
+                  "PatchTST-CM (Single)", "Transformer", "BiLSTM", "BiGRU", "BiLSTM-Attention",
+                  "PatchTST-RevIN (CI, 3x)", "PatchTST-CM (3x)", "Equal-Weight RNN Ens"]
     lats = [eff_profile[m]["CPU_ms"] for m in lat_models]
     bar_c = ["#0d9488" if "PatchTST" in m else ("#d97706" if "Ridge" in m else ("#1d3557" if "RNN" in m else "#64748b")) for m in lat_models]
     axes[1].barh(lat_models, lats, color=bar_c, height=0.62)
-    for i, v in enumerate(lats): axes[1].text(v + 0.025, i, f"{v:.2f} ms", va="center", fontsize=7.3)
-    axes[1].set_xlabel("Single-Sample CPU Inference Latency (ms)"); axes[1].set_title("(b) CPU Inference Latency Profile")
+    for i, v in enumerate(lats): axes[1].text(v + 0.025, i, f"{v:.2f} ms", va="center", fontsize=7.2)
+    axes[1].set_xlabel(f"Single-Sample CPU Latency (ms) — {cpu_brand}"); axes[1].set_title("(b) CPU Inference Latency Profile")
     axes[1].set_xlim(0, max(lats) * 1.25); axes[1].grid(axis="x", alpha=0.25)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig8_efficiency_pareto.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 9: Direct Group Permutation Importance on PatchTST-3x (Merged Load History Block!)
+    # Fig 9: Direct Group Permutation Importance on PatchTST-CM (3x)
     fig, ax = plt.subplots(figsize=(8.8, 3.8))
     df_p_plot = df_perm.sort_values("Delta_MAE_Mean_MW", ascending=True)
     ax.barh(df_p_plot["Feature_Group"], df_p_plot["Delta_MAE_Mean_MW"],
@@ -1321,34 +1504,34 @@ if __name__ == "__main__":
     for i, (_, r) in enumerate(df_p_plot.iterrows()):
         x_txt = max(0.0, r["Delta_MAE_Mean_MW"]) + r["Delta_MAE_Std_MW"] + 20
         ax.text(x_txt, i, f"{r['Delta_MAE_Mean_MW']:+.1f} MW (k={int(r['Num_Features'])})", va="center", fontsize=7.8)
-    ax.set_xlabel("Increase in Deployed PatchTST-3× MAE upon Block Permutation (MW)")
-    ax.set_title("Direct Group Permutation Importance on PatchTST-Ensemble (3×) (Merged Load Block, 15 Repeats)")
+    ax.set_xlabel("Increase in Deployed PatchTST-CM (3×) MAE upon Block Permutation (MW)")
+    ax.set_title("Direct Group Permutation Importance on PatchTST-CM (3×) (Merged Load Block, 15 Repeats)")
     ax.set_xlim(-25, (df_p_plot["Delta_MAE_Mean_MW"] + df_p_plot["Delta_MAE_Std_MW"]).max() * 1.28)
     ax.axvline(0, color="black", lw=0.8); ax.grid(axis="x", alpha=0.25)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig9_shap_attribution.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Fig 11: Conformal Intervals on PatchTST-3x (Static Split vs Rolling-Window vs LN-ACI)
+    # Fig 11: Conformal Intervals on PatchTST-CM (3x)
     fig, axes = plt.subplots(3, 1, figsize=(10.2, 7.6), sharex=True)
     panels = [
         (axes[0], cp_store_pt3["1. Static Split Conformal"], "#94a3b8",
-         f"(a) Static Split Conformal — 90% PICP={cp_store_pt3['1. Static Split Conformal']['PICP_%']:.1f}%, Winkler={cp_store_pt3['1. Static Split Conformal']['Winkler_MW']:.0f} MW"),
-        (axes[1], cp_store_pt3["2. Rolling-Window Conformal (120d)"], "#d97706",
-         f"(b) Rolling-Window Conformal (120d) — 90% PICP={cp_store_pt3['2. Rolling-Window Conformal (120d)']['PICP_%']:.1f}%, Winkler={cp_store_pt3['2. Rolling-Window Conformal (120d)']['Winkler_MW']:.0f} MW"),
+         f"(a) Static Split Conformal — 90% PICP={cp_store_pt3['1. Static Split Conformal']['PICP_%']:.1f}% (±{cp_store_pt3['1. Static Split Conformal']['PICP_CI_hw']:.1f} pp), Winkler={cp_store_pt3['1. Static Split Conformal']['Winkler_MW']:.0f} MW"),
+        (axes[1], cp_store_pt3["4. Plain ACI (No Local Scale)"], "#d97706",
+         f"(b) Plain ACI (Best Winkler) — 90% PICP={cp_store_pt3['4. Plain ACI (No Local Scale)']['PICP_%']:.1f}% (±{cp_store_pt3['4. Plain ACI (No Local Scale)']['PICP_CI_hw']:.1f} pp), Winkler={cp_store_pt3['4. Plain ACI (No Local Scale)']['Winkler_MW']:.0f} MW"),
         (axes[2], cp_store_pt3["5. Locally Normalized ACI (LN-ACI)"], "#0d9488",
-         f"(c) Locally Normalized ACI (LN-ACI) — 90% PICP={cp_store_pt3['5. Locally Normalized ACI (LN-ACI)']['PICP_%']:.1f}%, Winkler={cp_store_pt3['5. Locally Normalized ACI (LN-ACI)']['Winkler_MW']:.0f} MW"),
+         f"(c) Locally Normalized ACI (LN-ACI) — 90% PICP={cp_store_pt3['5. Locally Normalized ACI (LN-ACI)']['PICP_%']:.1f}% (±{cp_store_pt3['5. Locally Normalized ACI (LN-ACI)']['PICP_CI_hw']:.1f} pp), Winkler={cp_store_pt3['5. Locally Normalized ACI (LN-ACI)']['Winkler_MW']:.0f} MW"),
     ]
     for ax, obj, colr, ttl in panels:
         ax.fill_between(ds["te_dates"], obj["lo"], obj["hi"], color=colr, alpha=0.28,
                         label=f"90% PI (Mean Width {obj['Mean_Width_MW']:.0f} MW)")
         ax.plot(ds["te_dates"], y_te_inv, color="#111111", lw=1.0, label="Actual Demand")
-        ax.plot(ds["te_dates"], mean_preds["PatchTST-Ensemble (3x)"], color="#0f766e", lw=0.95, label="PatchTST-3×")
+        ax.plot(ds["te_dates"], mean_preds["PatchTST-CM (3x)"], color="#0f766e", lw=0.95, label="PatchTST-CM (3×)")
         ax.set_ylabel("Peak (MW)")
-        ax.set_title(ttl, fontsize=9.1, pad=24)
+        ax.set_title(ttl, fontsize=9.0, pad=24)
         ax.grid(alpha=0.25)
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False, fontsize=7.8)
     fig.tight_layout(); fig.savefig(f"{FIG_DIR}/fig11_conformal_intervals.pdf", bbox_inches="tight"); plt.close(fig)
 
-    # Save CSVs & metadata
+    # Save ALL CSVs & metadata
     df_seeds.to_csv(f"{OUT_DIR}/part1_per_seed_metrics.csv", index=False)
     df_summary.to_csv(f"{OUT_DIR}/part1_summary_metrics.csv")
     df_dm.to_csv(f"{OUT_DIR}/part1_dm_tests.csv", index=False)
@@ -1357,12 +1540,17 @@ if __name__ == "__main__":
     df_cp_sea.to_csv(f"{OUT_DIR}/part1_conformal_seasonal.csv", index=False)
     df_abl.to_csv(f"{OUT_DIR}/part1_ablation.csv", index=False)
     df_reg.to_csv(f"{OUT_DIR}/part1_regime_analysis.csv", index=False)
+    df_hol_tests.to_csv(f"{OUT_DIR}/part1_regime_tests.csv", index=False)
     df_bins.to_csv(f"{OUT_DIR}/part1_demand_bins.csv", index=False)
+    df_gap.to_csv(f"{OUT_DIR}/part1_gap_audit.csv", index=False)
+    df_jitter.to_csv(f"{OUT_DIR}/part1_eid_jitter.csv", index=False)
+    df_val_sens.to_csv(f"{OUT_DIR}/part1_val_sensitivity.csv", index=False)
     df_perm.to_csv(f"{OUT_DIR}/part1_permutation_importance.csv", index=False)
     pd.DataFrame(eff_profile).T.to_csv(f"{OUT_DIR}/part1_efficiency.csv")
 
     mean_w = np.mean(learned_weights, axis=0)
     meta_out = {
+        "cpu_hardware": cpu_brand, "torch_threads": TORCH_THREADS, "blas_threads": 1,
         "n_clean": ds["n_raw"], "n_features": ds["n_features"], "year_dropped": True,
         "tau_star_C": ds["tau_star"], "tau_slope_detrended_MW_per_C": round(ds["tau_slope"], 2),
         "secular_trend_MW_per_yr": round(ds["trend_mw_per_yr"], 1),
@@ -1370,8 +1558,7 @@ if __name__ == "__main__":
         "tuned_neural_lrs": tuned_lrs,
         "n_train": len(X_tr), "n_val_total": len(ds["X_va"]),
         "n_val_es": len(X_va_es), "n_val_cal": len(X_va_cal), "n_test": len(X_te),
-        "seeds": SEEDS,
-        "wkday_persist_mae": round(wkday_mae, 2),
+        "seeds": SEEDS, "wkday_persist_mae": round(wkday_mae, 2),
         "pt3_s42_mae": round(float(mean_absolute_error(y_te_inv, seed_preds[42][ref_name])), 2),
         "pt3_5seed_mae": round(float(mean_absolute_error(y_te_inv, mean_preds[ref_name])), 2),
         "learned_weights_per_seed": {str(s): [round(x, 4) for x in w] for s, w in zip(SEEDS, learned_weights)},
@@ -1382,4 +1569,4 @@ if __name__ == "__main__":
     with open(f"{OUT_DIR}/part1_meta.json", "w") as f:
         json.dump(meta_out, f, indent=2)
 
-    print(f"\nALL ROUND-2 BENCHMARK EXPERIMENTS COMPLETED IN {time.perf_counter() - t_start:.1f}s!", flush=True)
+    print(f"\nALL v4 BENCHMARK EXPERIMENTS COMPLETED IN {time.perf_counter() - t_start:.1f}s!", flush=True)

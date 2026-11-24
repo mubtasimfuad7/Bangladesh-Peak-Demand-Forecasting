@@ -1,13 +1,13 @@
 Model,S42_MAE_pMCS,S42_RMSE_pMCS,Ens5_MAE_pMCS,Ens5_RMSE_pMCS,In_95_MCS_MAE_S42,In_95_MCS_RMSE_S42
-PatchTST-Ensemble (3x),1.0,1.0,1.0,0.988,True,True
-"PatchTST-Diff (Δy, 3x)",0.672,0.699,0.915,0.291,True,True
-PatchTST,0.672,0.801,0.915,0.927,True,True
-Val-Opt RNN Ensemble,0.672,0.801,0.915,1.0,True,True
-Ridge (14xF),0.672,0.801,0.915,0.476,True,True
-Equal-Weight RNN Ens,0.571,0.801,0.915,0.988,True,True
-Ridge-Diff (Δy),0.672,0.699,0.753,0.376,True,True
-BiLSTM,0.415,0.699,0.915,0.89,True,True
-BiLSTM-Attention,0.069,0.421,0.915,0.718,True,True
-Hybrid BiLSTM-Attn-XGBoost,0.415,0.699,0.915,0.988,True,True
-Weekday-Adj Persistence,0.415,0.196,0.122,0.021,True,True
-Hybrid BiGRU-XGBoost,0.006,0.196,0.445,0.656,False,True
+PatchTST-CM (3x),1.0,1.0,1.0,0.889,True,True
+PatchTST-CM (Single),0.789,0.786,0.727,0.828,True,True
+"PatchTST-CM-Diff (Δy, 3x)",0.947,0.69,0.727,0.251,True,True
+Equal-Weight RNN Ens,0.947,0.794,0.727,0.885,True,True
+Val-Opt RNN Ensemble,0.789,0.723,0.727,1.0,True,True
+Ridge (14xF),0.789,0.723,0.639,0.556,True,True
+Ridge-Diff (Δy),0.748,0.723,0.639,0.37,True,True
+BiLSTM-Attention,0.672,0.723,0.639,0.728,True,True
+BiLSTM,0.672,0.723,0.639,0.556,True,True
+BiGRU,0.748,0.723,0.551,0.728,True,True
+Weekday-Adj Persistence,0.196,0.042,0.089,0.022,True,False
+Hybrid BiLSTM-Attn-XGBoost,0.585,0.676,0.639,0.765,True,True

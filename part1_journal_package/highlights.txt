@@ -1,7 +1,7 @@
 Highlights (Elsevier Submission — <= 85 characters per bullet):
 
-- Benchmarks 24 models over 5 seeds on 6.5 yr of BPDB peak electricity records.
-- PatchTST-3x, Ridge, and Eq-Wt RNN form a tied 95% MCS leading group on 2025-26.
-- Weekday persistence and Ridge-Diff lead 3-fold CV (551-563 MW) across 2023-26.
-- 5-way conformal ablation: Plain ACI cuts Winkler -25%; LN-ACI hits 88-90% PICP.
-- Climatology+Ridge hybrid prevents multi-horizon degradation beyond 7-14 days.
+- Benchmarks 25 models over 5 seeds on 6.5 yr of BPDB peak electricity records.
+- 95% MCS excludes only 2/48 top-12 entries; weekday persistence stays in on MAE.
+- First-differencing cuts 2023 PatchTST MAE from 909 to 516 MW (546 MW CV mean).
+- Plain ACI minimizes Winkler (-25%); local scaling restores summer PICP to ~90%.
+- Climatology-Ridge convex blend prevents multi-horizon drift past 7 days.

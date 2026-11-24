@@ -102,7 +102,11 @@ rolling_df = load_journal_csv("part1_rolling_cv.csv")
 lc_df = load_journal_csv("part1_learning_curve.csv")
 ablation_df = load_journal_csv("part1_ablation.csv")
 regime_df = load_journal_csv("part1_regime_analysis.csv")
+hol_tests_df = load_journal_csv("part1_regime_tests.csv")
 bins_df = load_journal_csv("part1_demand_bins.csv")
+gap_df = load_journal_csv("part1_gap_audit.csv")
+jitter_df = load_journal_csv("part1_eid_jitter.csv")
+val_sens_df = load_journal_csv("part1_val_sensitivity.csv")
 div_df = load_journal_csv("part1_divisional_pytorch.csv")
 horizon_df = load_journal_csv("part1_multihorizon.csv")
 conformal_df = load_journal_csv("part1_conformal.csv")
@@ -115,27 +119,28 @@ if not eff_df.empty and "Unnamed: 0" in eff_df.columns:
 # Header
 st.title(":material/bolt: Bangladesh peak electricity demand forecasting")
 st.caption(
-    "24-model 5-seed benchmark with 95% Hansen Model Confidence Set, HLN-DM tests referenced to PatchTST-3×, "
-    "3-fold rolling-origin CV, 5-way conformal uncertainty ablation on untouched Val-Cal residuals, "
-    "same-split 8-division forecasts, causal 1–30 day hybrids, and direct merged-block permutation importance."
+    "25-model 5-seed benchmark (channel-mixing PatchTST-CM, faithful PatchTST-RevIN, Ridge, differenced trees, RNN ensembles), "
+    "95% Hansen MCS, uniform 5-seed rolling CV with Δy & RevIN controls, 5-way conformal ablation with block-bootstrap CIs, "
+    "same-split 8-division DM tests, multi-horizon convex blend, and operational audits."
 )
 
 # Sidebar
 with st.sidebar:
     st.subheader(":material/tune: Protocol & data QA")
     st.markdown(
-        ":green-badge[Train-only scaling] :blue-badge[95% Hansen MCS] :orange-badge[5-way conformal]"
+        ":green-badge[Train-only scaling] :blue-badge[25 models × 5 seeds] :orange-badge[5-way conformal]"
     )
     qa = meta.get("data_qa", {})
     st.caption(
         f"**Records:** {len(df):,} BPDB cycles across {qa.get('calendar_span_days', 2414):,} calendar days "
-        f"({qa.get('missing_calendar_days', 20)} reporting gaps audited)  \n"
+        f"({qa.get('missing_calendar_days', 20)} reporting gaps; {qa.get('test_gap_spanning_windows', 42)}/462 gap-spanning test windows)  \n"
         f"**Peak range:** {df['Peak_Demand_MW'].min():,.0f}–{df['Peak_Demand_MW'].max():,.0f} MW "
         f"({df['Peak_Demand_GW'].min():.2f}–{df['Peak_Demand_GW'].max():.2f} GW)  \n"
         f"**Features:** {meta.get('n_features', 117)} channels (raw `Year` dropped)  \n"
         f"**Splits:** Train 1,652 · Val-ES 105 · Val-Cal 105 · Test 462  \n"
         f"**Detrended cooling threshold:** τ* = {meta.get('tau_star_C', 25.0):.1f} °C "
         f"(+{meta.get('tau_slope_detrended_MW_per_C', 387.2):.1f} MW/°C; HDD omitted)  \n"
+        f"**Hardware:** {meta.get('cpu_hardware', 'Apple M1 (8-core ARM64)')} ({meta.get('torch_threads', 2)} PyTorch / {meta.get('blas_threads', 1)} BLAS thread)  \n"
         f"**Robust QA line loss:** {qa.get('robust_mean_loss_mw', 508.3):.1f} MW mean / "
         f"{qa.get('robust_median_loss_mw', 510.0):.1f} MW median "
         f"({qa.get('negative_loss_records', 16)} neg + {qa.get('upper_outlier_loss_records', 3)} upper IQR outliers excluded)"
@@ -170,51 +175,45 @@ filtered_df = df[
 # Top KPI row
 recent_spark = df["Peak_Demand_MW"].tail(60).round(0).tolist()
 pt3_row = (
-    summary_df[summary_df["Model"] == "PatchTST-Ensemble (3x)"].iloc[0]
-    if not summary_df.empty and (summary_df["Model"] == "PatchTST-Ensemble (3x)").any()
+    summary_df[summary_df["Model"] == "PatchTST-CM (3x)"].iloc[0]
+    if not summary_df.empty and (summary_df["Model"] == "PatchTST-CM (3x)").any()
     else None
 )
 plain_aci90 = (
     conformal_df[
-        (conformal_df["Model"] == "PatchTST-Ensemble (3x)")
+        (conformal_df["Model"] == "PatchTST-CM (3x)")
         & (conformal_df["Method"].str.contains("Plain ACI"))
         & (conformal_df["Nominal_%"] == 90)
     ].iloc[0]
     if not conformal_df.empty and "Model" in conformal_df.columns
     else None
 )
-hol_row = (
-    regime_df[regime_df["Regime"].str.contains("Holiday", na=False)].iloc[0]
-    if not regime_df.empty and "Regime" in regime_df.columns
-    else None
-)
 
 with st.container(horizontal=True):
     st.metric(
-        "2025–26 MCS leader (tied)",
-        f"{pt3_row['MAE_mean']:.2f} ± {pt3_row['MAE_std']:.2f} MW" if pt3_row is not None else "584.20 ± 10.71 MW",
-        f"PatchTST-3× ({pt3_row['Skill_Wkday_mean']:+.1f}% vs wkday)" if pt3_row is not None else "+7.8% vs wkday",
+        "Lowest 2025–26 test MAE",
+        f"{pt3_row['MAE_mean']:.2f} ± {pt3_row['MAE_std']:.2f} MW" if pt3_row is not None else "576.94 ± 4.01 MW",
+        f"PatchTST-CM (3×) · {pt3_row['Skill_Wkday_mean']:+.1f}% vs wkday" if pt3_row is not None else "+8.9% vs wkday",
         delta_color="off",
         border=True,
     )
     st.metric(
-        "3-fold CV leader (2023–26)",
-        f"{rolling_df['Wkday_MAE'].mean():.2f} MW" if not rolling_df.empty and "Wkday_MAE" in rolling_df.columns else "551.01 MW",
-        f"Wkday Persist · Ridge-Diff {rolling_df['RidgeDiff_MAE'].mean():.1f} MW"
-        if not rolling_df.empty and "RidgeDiff_MAE" in rolling_df.columns else "Ridge-Diff 562.8 MW",
+        "Best 3-fold CV mean (5-seed)",
+        f"{rolling_df['PatchTSTDiff_MAE'].mean():.2f} MW" if not rolling_df.empty and "PatchTSTDiff_MAE" in rolling_df.columns else "546.26 MW",
+        "PatchTST-CM-Diff (Δy) · Wkday 551.0",
         delta_color="off",
         border=True,
     )
     st.metric(
         "Best 90% Winkler (Plain ACI)",
-        f"{plain_aci90['Winkler_MW']:,.0f} MW" if plain_aci90 is not None else "3,636 MW",
-        "−25.3% vs static · LN-ACI 88.1–90.1% PICP",
+        f"{plain_aci90['Winkler_MW']:,.0f} MW" if plain_aci90 is not None else "3,674 MW",
+        "−24.9% vs static · 2,450 MW width",
         border=True,
     )
     st.metric(
-        "Holiday / Eid leader (n=41)",
-        f"{hol_row['Ridge_MAE']:.1f} MW" if hol_row is not None else "867.9 MW",
-        f"Ridge (Eq-RNN {hol_row['EqRNN_MAE']:.1f} · PT3 {hol_row['PT3_MAE']:.1f})" if hol_row is not None else "Ridge leads festivals",
+        "95% MCS discrimination",
+        "2 / 48 excluded",
+        "Wkday stays in on MAE (p=0.196/0.089)",
         delta_color="off",
         border=True,
     )
@@ -229,10 +228,10 @@ with st.container(horizontal=True):
 
 tabs = st.tabs(
     [
-        ":material/leaderboard: 24-model benchmark & MCS",
-        ":material/timeline: Rolling CV & ablations",
+        ":material/leaderboard: 25-model benchmark & MCS",
+        ":material/timeline: 5-seed CV, ablations & audits",
         ":material/map: Same-split 8 divisions",
-        ":material/schedule: Multi-horizon & 5-way conformal",
+        ":material/schedule: Multi-horizon blend & conformal",
         ":material/psychology: Direct explainability",
         ":material/analytics: Appendix A — QA grid data",
         ":material/tune: Scenario simulator & paper",
@@ -240,13 +239,13 @@ tabs = st.tabs(
 )
 
 # ---------------------------------------------------------------------------
-# TAB 1: 24-Model National Benchmark & 95% Hansen MCS
+# TAB 1: 25-Model National Benchmark & 95% Hansen MCS
 # ---------------------------------------------------------------------------
 with tabs[0]:
-    st.subheader("National 24-model 5-seed benchmark & 95% Hansen MCS (Mar 2025 – Jun 2026, n = 462)")
+    st.subheader("National 25-model 5-seed benchmark & 95% Hansen MCS (Mar 2025 – Jun 2026, n = 462)")
     st.caption(
-        "Strict train-only scaling, raw Year dropped, 14-day split embargoes, separate Val-ES (105d) and Val-Cal (105d) partitions, "
-        "and matched Val-ES hyperparameter tuning across all families. PatchTST-3×, PatchTST-Diff, Ridge, and Equal-Weight RNN form a statistically tied leading group inside the 95% MCS."
+        "Explicit separation of channel-mixing PatchTST-CM (no RevIN) vs faithful univariate PatchTST-RevIN (CI). "
+        "Only 2 of 48 top-12 entries are excluded by the 95% MCS (Weekday Persistence on RMSE only), showing limited discrimination power on MAE at n = 462."
     )
 
     if not summary_df.empty:
@@ -281,7 +280,7 @@ with tabs[0]:
         col_c, col_t = st.columns([1.25, 1.0])
         with col_c:
             with st.container(border=True):
-                st.markdown(f"**24-model comparison by {metric_choice} (mean ± 1 SD across 5 seeds)**")
+                st.markdown(f"**25-model comparison by {metric_choice} (mean ± 1 SD across 5 seeds)**")
                 bars = (
                     alt.Chart(plot_df)
                     .mark_bar(cornerRadiusEnd=4)
@@ -315,13 +314,13 @@ with tabs[0]:
                             y=alt.Y("Model:N", sort=plot_df["Model"].tolist()),
                         )
                     )
-                    st.altair_chart((bars + err).properties(height=580))
+                    st.altair_chart((bars + err).properties(height=600))
                 else:
-                    st.altair_chart(bars.properties(height=580))
+                    st.altair_chart(bars.properties(height=600))
 
         with col_t:
             with st.container(border=True):
-                st.markdown("**Full 24-model scorecard**")
+                st.markdown("**Full 25-model scorecard**")
                 disp = summary_df.sort_values("MAE_mean").copy()
                 disp["MAE (MW)"] = disp.apply(lambda r: f"{r['MAE_mean']:.2f} ± {r['MAE_std']:.2f}", axis=1)
                 disp["RMSE (MW)"] = disp.apply(lambda r: f"{r['RMSE_mean']:.2f} ± {r['RMSE_std']:.2f}", axis=1)
@@ -334,7 +333,7 @@ with tabs[0]:
                         "R2_mean": st.column_config.NumberColumn("R²", format="%.3f"),
                     },
                     hide_index=True,
-                    height=580,
+                    height=600,
                 )
 
     col_mcs, col_dm = st.columns([0.95, 1.25])
@@ -342,7 +341,7 @@ with tabs[0]:
         with st.container(border=True):
             st.markdown("**95% Hansen Model Confidence Set (top 12 models)**")
             st.caption(
-                "Moving-block bootstrap (T_max, block 7, 1,000 resamples). All top seven models remain inside the 95% MCS on both MAE and RMSE (p_MCS ≥ 0.29)."
+                "Only 2 of 48 entries are excluded (Weekday Persistence on RMSE only). Inclusion reflects low power at n = 462, not proof of equivalence."
             )
             if not mcs_df.empty:
                 st.dataframe(
@@ -355,22 +354,22 @@ with tabs[0]:
                         "Ens5_RMSE_pMCS": st.column_config.NumberColumn("5-Seed RMSE p", format="%.3f"),
                     },
                     hide_index=True,
-                    height=430,
+                    height=440,
                 )
 
     with col_dm:
         with st.container(border=True):
-            st.markdown("**HLN-adjusted Diebold–Mariano tests (Ref: PatchTST-Ensemble 3×)**")
+            st.markdown("**Descriptive HLN-adjusted Diebold–Mariano tests (Ref: PatchTST-CM 3×)**")
             st.caption(
-                "Holm–Bonferroni adjusted across 23 comparators. On Seed-42 (577.37 MW), PatchTST-3× significantly beats 14/23 baselines (p_Holm ≤ 0.018); "
-                "gaps vs Ridge (p_Holm = 0.407 / 1.000) and Equal-Weight RNN (0.407 / 1.000) are not significant."
+                "Holm–Bonferroni adjusted across 24 comparators (descriptive because reference is selected by test MAE). "
+                "Seed-42 columns provide the like-for-like comparison against deterministic Ridge and persistence."
             )
             if not dm_df.empty:
                 dm_p = dm_df.sort_values("Ens5_Delta_MW").copy()
                 dm_p["Sig"] = np.where(dm_p["Ens5_p_holm"] < 0.05, "p_Holm < 0.05 (5-seed)", "Not significant")
                 zr = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(strokeDash=[4, 4], color="#64748B").encode(x="x:Q")
                 ci = alt.Chart(dm_p).mark_rule(strokeWidth=2).encode(
-                    x=alt.X("Ens5_CI_lo:Q", title="ΔMAE (PatchTST-3× minus comparator, MW, 95% CI)"),
+                    x=alt.X("Ens5_CI_lo:Q", title="ΔMAE (PatchTST-CM 3× minus comparator, MW, 95% CI)"),
                     x2="Ens5_CI_hi:Q",
                     y=alt.Y("Comparator:N", sort=dm_p["Comparator"].tolist(), title=None),
                     color=alt.Color(
@@ -391,21 +390,21 @@ with tabs[0]:
                         alt.Tooltip("Ens5_p_holm:Q", title="5-Seed p_Holm", format=".4f"),
                     ],
                 )
-                st.altair_chart((zr + ci + pt).properties(height=430))
+                st.altair_chart((zr + ci + pt).properties(height=440))
 
     col_sp, col_eff = st.columns([1.05, 1.0])
     with col_sp:
         with st.container(border=True):
-            st.markdown("**5-seed dispersion across leading architectures**")
+            st.markdown("**Appendix B preview: 5-seed per-seed dispersion**")
             if not per_seed_df.empty:
                 top_m = [
-                    "PatchTST-Ensemble (3x)",
-                    "PatchTST-Diff (Δy, 3x)",
-                    "PatchTST",
+                    "PatchTST-CM (3x)",
+                    "PatchTST-CM (Single)",
+                    "PatchTST-CM-Diff (Δy, 3x)",
+                    "Equal-Weight RNN Ens",
                     "Val-Opt RNN Ensemble",
                     "Ridge (14xF)",
-                    "Equal-Weight RNN Ens",
-                    "BiLSTM",
+                    "PatchTST-RevIN (CI, 3x)",
                     "DLinear (CI)",
                 ]
                 sub = per_seed_df[per_seed_df["Model"].isin(top_m)].copy()
@@ -424,9 +423,9 @@ with tabs[0]:
 
     with col_eff:
         with st.container(border=True):
-            st.markdown("**Computational efficiency profile (consistent fp32 KiB & CPU ms)**")
+            st.markdown(f"**Efficiency profile (fp32 KiB & CPU ms — {meta.get('cpu_hardware', 'Apple M1')})**")
             if not eff_df.empty and not summary_df.empty:
-                em = eff_df.merge(summary_df[["Model", "MAE_mean"]], on="Model", how="left").sort_values("MAE_mean")
+                em = eff_df.merge(summary_df[["Model", "MAE_mean"]], on="Model", how="left").dropna(subset=["MAE_mean"]).sort_values("MAE_mean")
                 st.dataframe(
                     em[["Model", "MAE_mean", "Params", "Size_KiB", "CPU_ms"]],
                     column_config={
@@ -440,23 +439,23 @@ with tabs[0]:
                 )
 
 # ---------------------------------------------------------------------------
-# TAB 2: Rolling CV, History Sensitivity, Ablation & Regimes
+# TAB 2: Uniform 5-Seed Rolling CV, Architecture-Dependent Ablations & Audits
 # ---------------------------------------------------------------------------
 with tabs[1]:
-    st.subheader("3-fold rolling-origin CV, within-period history sensitivity, and ablations")
+    st.subheader("Uniform 5-seed rolling-origin CV (Δy & RevIN controls), ablations & operational audits")
     st.caption(
-        "Across 3 expanding folds (2023–2026), Weekday-Adjusted Persistence (551.01 MW) and Ridge-Diff (562.76 MW) lead the 3-fold mean "
-        "while deep models suffer sharp Fold-1 (2023) errors. The trailing-history curve holds 2025–2026 fixed (same test window as Fold 3) as a within-period sensitivity diagnostic."
+        "Level PatchTST-CM collapses in Fold 1 (909.1 MW), whereas first-differenced PatchTST-CM-Diff drops Fold 1 to 516.3 MW and achieves the lowest 3-fold mean (546.3 MW), "
+        "confirming level-shift extrapolation rather than sample size drives Fold-1 error."
     )
 
     col_cv, col_lc = st.columns(2)
     with col_cv:
         with st.container(border=True):
-            st.markdown("**3-fold expanding-window rolling-origin CV (2023–2026)**")
+            st.markdown("**Uniform 5-seed 3-fold rolling-origin CV (2023–2026)**")
             if not rolling_df.empty:
                 cv_long = rolling_df.melt(
                     id_vars=["Fold"],
-                    value_vars=["Wkday_MAE", "RidgeDiff_MAE", "Ridge_MAE", "SARIMAX_MAE", "XGBDiff_MAE", "EqRNN_MAE", "PatchTST3_MAE"],
+                    value_vars=["Wkday_MAE", "RidgeDiff_MAE", "PatchTSTDiff_MAE", "PatchTSTRevIN_MAE", "EqRNN_MAE", "PatchTST3_MAE"],
                     var_name="Model",
                     value_name="MAE_MW",
                 )
@@ -464,11 +463,10 @@ with tabs[1]:
                     {
                         "Wkday_MAE": "Wkday Persist.",
                         "RidgeDiff_MAE": "Ridge-Diff (Δy)",
-                        "Ridge_MAE": "Ridge (14×F)",
-                        "SARIMAX_MAE": "SARIMAX",
-                        "XGBDiff_MAE": "XGBoost-Diff",
+                        "PatchTSTDiff_MAE": "PatchTST-CM-Diff (Δy)",
+                        "PatchTSTRevIN_MAE": "PatchTST-RevIN (CI)",
                         "EqRNN_MAE": "Equal-Wt RNN",
-                        "PatchTST3_MAE": "PatchTST-3×",
+                        "PatchTST3_MAE": "PatchTST-CM (Level)",
                     }
                 )
                 st.altair_chart(
@@ -483,21 +481,21 @@ with tabs[1]:
                     .properties(height=280)
                 )
                 st.dataframe(
-                    rolling_df[["Fold", "N_Train", "Wkday_MAE", "RidgeDiff_MAE", "Ridge_MAE", "SARIMAX_MAE", "EqRNN_MAE", "PatchTST3_MAE"]],
+                    rolling_df[["Fold", "Wkday_MAE", "RidgeDiff_MAE", "PatchTSTDiff_MAE", "PatchTSTRevIN_MAE", "EqRNN_MAE", "PatchTST3_MAE"]],
                     column_config={
                         "Wkday_MAE": st.column_config.NumberColumn("Wkday", format="%.1f"),
                         "RidgeDiff_MAE": st.column_config.NumberColumn("Ridge-Δy", format="%.1f"),
-                        "Ridge_MAE": st.column_config.NumberColumn("Ridge", format="%.1f"),
-                        "SARIMAX_MAE": st.column_config.NumberColumn("SARIMAX", format="%.1f"),
+                        "PatchTSTDiff_MAE": st.column_config.NumberColumn("PT-Δy", format="%.1f"),
+                        "PatchTSTRevIN_MAE": st.column_config.NumberColumn("PT-RevIN", format="%.1f"),
                         "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.1f"),
-                        "PatchTST3_MAE": st.column_config.NumberColumn("PT3", format="%.1f"),
+                        "PatchTST3_MAE": st.column_config.NumberColumn("PT-Lvl", format="%.1f"),
                     },
                     hide_index=True,
                 )
 
     with col_lc:
         with st.container(border=True):
-            st.markdown("**Within-period sensitivity to trailing training length (fixed 2025–26 test)**")
+            st.markdown("**Within-period sensitivity to trailing history (fixed 2025–26 test)**")
             if not lc_df.empty:
                 lc_long = lc_df.melt(
                     id_vars=["Train_Years"],
@@ -507,7 +505,7 @@ with tabs[1]:
                 )
                 lc_long["Model"] = lc_long["Model"].replace(
                     {
-                        "PatchTST3_MAE": "PatchTST-3×",
+                        "PatchTST3_MAE": "PatchTST-CM (3×)",
                         "Ridge_MAE": "Ridge (14×F)",
                         "EqRNN_MAE": "Equal-Wt RNN",
                         "SARIMAX_MAE": "SARIMAX",
@@ -529,35 +527,34 @@ with tabs[1]:
     col_ab, col_bn = st.columns(2)
     with col_ab:
         with st.container(border=True):
-            st.markdown("**Validation-first 5-seed ablation on PatchTST-3× & Ridge**")
+            st.markdown("**Architecture-dependent 5-seed ablation (PatchTST-CM, Eq-RNN & Ridge)**")
             st.caption(
-                "Detrended CDD_25 and Eid flags yield non-significant overall shifts (p = 0.237) while cutting PatchTST-3× Holiday MAE by −101.4 MW. "
-                "95%-variance PCA significantly degrades PatchTST-3× (+83.1 MW, paired p = 0.006**) and Ridge (+33.5 MW)."
+                "95% PCA degrades PatchTST-CM (+79.5 MW, p = 0.001) and Ridge (+33.5 MW), while leaving Equal-Weight RNN unchanged (596.3 → 597.5 MW, p = 0.333)."
             )
             if not ablation_df.empty:
                 st.dataframe(
                     ablation_df[
-                        ["Config", "Dims", "PT3_ValCal_MAE", "PT3_Test_MAE", "PT3_Test_SD", "p_paired_vs_Base", "PT3_Hol_MAE", "Ridge_Test_MAE"]
+                        ["Config", "Dims", "PT3_Test_MAE", "PT3_p_vs_Base", "EqRNN_Test_MAE", "EqRNN_p_vs_Base", "Ridge_Test_MAE"]
                     ],
                     column_config={
-                        "PT3_ValCal_MAE": st.column_config.NumberColumn("PT3 Val-Cal", format="%.1f"),
-                        "PT3_Test_MAE": st.column_config.NumberColumn("PT3 Test", format="%.2f"),
-                        "PT3_Test_SD": st.column_config.NumberColumn("SD", format="%.2f"),
-                        "p_paired_vs_Base": st.column_config.NumberColumn("Paired p", format="%.3f"),
-                        "PT3_Hol_MAE": st.column_config.NumberColumn("PT3 Hol", format="%.1f"),
-                        "Ridge_Test_MAE": st.column_config.NumberColumn("Ridge Test", format="%.2f"),
+                        "PT3_Test_MAE": st.column_config.NumberColumn("PT-CM", format="%.2f"),
+                        "PT3_p_vs_Base": st.column_config.NumberColumn("PT p", format="%.3f"),
+                        "EqRNN_Test_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.2f"),
+                        "EqRNN_p_vs_Base": st.column_config.NumberColumn("RNN p", format="%.3f"),
+                        "Ridge_Test_MAE": st.column_config.NumberColumn("Ridge", format="%.2f"),
                     },
                     hide_index=True,
                 )
 
     with col_bn:
         with st.container(border=True):
-            st.markdown("**Peak demand magnitude bins & regime breakdown**")
+            st.markdown("**Prior-day y(t−1) demand bins (no target-selection bias) & Holiday DM tests**")
             if not bins_df.empty:
                 st.dataframe(
-                    bins_df[["Demand_Bin", "N", "PT3_MAE", "Ridge_MAE", "EqRNN_MAE", "XGBD_MAE", "XGB_MAE", "Wkday_MAE"]],
+                    bins_df[["Lag1_Demand_Bin", "N", "PT3_MAE", "Ridge_MAE", "EqRNN_MAE", "XGBD_MAE", "XGB_MAE", "Wkday_MAE"]],
                     column_config={
-                        "PT3_MAE": st.column_config.NumberColumn("PT3", format="%.1f"),
+                        "Lag1_Demand_Bin": st.column_config.TextColumn("y(t−1) bin"),
+                        "PT3_MAE": st.column_config.NumberColumn("PT-CM", format="%.1f"),
                         "Ridge_MAE": st.column_config.NumberColumn("Ridge", format="%.1f"),
                         "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.1f"),
                         "XGBD_MAE": st.column_config.NumberColumn("XGB-Δy", format="%.1f"),
@@ -566,34 +563,51 @@ with tabs[1]:
                     },
                     hide_index=True,
                 )
-            if not regime_df.empty:
+            if not hol_tests_df.empty:
+                st.caption("Paired Holiday/Eid tests (n = 41, Ref = Ridge 867.9 MW) — none reach significance:")
                 st.dataframe(
-                    regime_df[["Regime", "N", "PT3_MAE", "Ridge_MAE", "EqRNN_MAE", "XGBD_MAE", "Wkday_MAE"]],
+                    hol_tests_df[["Comparison", "Ridge_MAE", "Other_MAE", "Delta_MW", "p_val"]],
                     column_config={
-                        "PT3_MAE": st.column_config.NumberColumn("PT3", format="%.1f"),
                         "Ridge_MAE": st.column_config.NumberColumn("Ridge", format="%.1f"),
-                        "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.1f"),
-                        "XGBD_MAE": st.column_config.NumberColumn("XGB-Δy", format="%.1f"),
-                        "Wkday_MAE": st.column_config.NumberColumn("Wkday", format="%.1f"),
+                        "Other_MAE": st.column_config.NumberColumn("Other", format="%.1f"),
+                        "Delta_MW": st.column_config.NumberColumn("ΔMAE", format="%+.1f"),
+                        "p_val": st.column_config.NumberColumn("p-value", format="%.3f"),
                     },
                     hide_index=True,
                 )
 
+    col_au1, col_au2, col_au3 = st.columns(3)
+    with col_au1:
+        with st.container(border=True):
+            st.markdown("**Calendar-gap audit (420 vs 42)**")
+            if not gap_df.empty:
+                st.dataframe(gap_df[["Subset", "N", "PT3_MAE", "Ridge_MAE", "Wkday_MAE"]], hide_index=True)
+    with col_au2:
+        with st.container(border=True):
+            st.markdown("**Eid ±1d lunar jitter (Seed 42)**")
+            if not jitter_df.empty:
+                st.dataframe(jitter_df[["Eid_Shift_Days", "PT3_Hol_MAE", "Ridge_Hol_MAE", "EqRNN_Hol_MAE"]], hide_index=True)
+    with col_au3:
+        with st.container(border=True):
+            st.markdown("**2024 summer-inclusive validation**")
+            if not val_sens_df.empty:
+                st.dataframe(val_sens_df, hide_index=True)
+
 # ---------------------------------------------------------------------------
-# TAB 3: Same-Split 8-Division Forecasts
+# TAB 3: Same-Split 8-Division Forecasts (5 Seeds + Paired DM Tests)
 # ---------------------------------------------------------------------------
 with tabs[2]:
-    st.subheader("Same-split 8-division peak demand benchmark (5 seeds, identical 2025–26 split)")
+    st.subheader("Same-split 8-division peak demand benchmark (5 seeds + paired HLN-DM tests)")
     st.caption(
-        "Equal-Weight RNN outperforms PatchTST-3× in all 8 of 8 divisions and leads 5 regional grids (Rajshahi, Khulna, Mymensingh, Barishal, Sylhet). "
-        "Single BiGRU, Ridge, and Equal-Weight RNN tie closely in Dhaka (249.6–251.3 MW), while Weekday Persistence (73.0 MW) and Ridge (74.3 MW) edge ahead in Chattogram."
+        "Equal-Weight RNN significantly beats PatchTST-CM (3×) at p < 0.05 in 7 of 8 divisions (Rajshahi p = 0.379 ns), "
+        "while Ridge leads Dhaka (251.2 MW) and Rangpur (56.6 MW), and Weekday Persistence (73.0 MW) & Ridge (74.3 MW) lead Chattogram."
     )
 
     if not div_df.empty:
-        col_d1, col_d2 = st.columns([1.2, 1.0])
+        col_d1, col_d2 = st.columns([1.15, 1.05])
         with col_d1:
             with st.container(border=True):
-                st.markdown("**Same-split divisional MAPE comparison**")
+                st.markdown("**Same-split divisional MAPE comparison (5 seeds)**")
                 div_l = div_df.melt(
                     id_vars=["Division"],
                     value_vars=["EqRNN_MAPE", "PT3_MAPE", "Ridge_MAPE", "Wkday_MAPE"],
@@ -603,7 +617,7 @@ with tabs[2]:
                 div_l["Method"] = div_l["Method"].replace(
                     {
                         "EqRNN_MAPE": "Equal-Weight RNN",
-                        "PT3_MAPE": "PatchTST-3×",
+                        "PT3_MAPE": "PatchTST-CM (3×)",
                         "Ridge_MAPE": "Ridge (14×F)",
                         "Wkday_MAPE": "Wkday Persistence",
                     }
@@ -618,7 +632,7 @@ with tabs[2]:
                         color=alt.Color(
                             "Method:N",
                             scale=alt.Scale(
-                                domain=["Equal-Weight RNN", "PatchTST-3×", "Ridge (14×F)", "Wkday Persistence"],
+                                domain=["Equal-Weight RNN", "PatchTST-CM (3×)", "Ridge (14×F)", "Wkday Persistence"],
                                 range=["#2563EB", "#0D9488", "#D97706", "#94A3B8"],
                             ),
                             legend=alt.Legend(orient="bottom", title=None),
@@ -630,17 +644,17 @@ with tabs[2]:
 
         with col_d2:
             with st.container(border=True):
-                st.markdown("**Same-split 8-division MAE scorecard (MW)**")
+                st.markdown("**Same-split 8-division MAE (MW) & paired DM p-values**")
                 st.dataframe(
-                    div_df[["Division", "EqRNN_MAE", "PT3_MAE", "Ridge_MAE", "BiGRU_MAE", "Wkday_MAE", "EqRNN_MAPE"]],
+                    div_df[["Division", "EqRNN_MAE", "PT3_MAE", "p_DM_EqRNN_vs_PT3", "BiGRU_MAE", "Ridge_MAE", "Wkday_MAE"]],
                     column_config={
                         "Division": st.column_config.TextColumn("Division", pinned=True),
-                        "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN (MW)", format="%.1f"),
-                        "PT3_MAE": st.column_config.NumberColumn("PT3 (MW)", format="%.1f"),
-                        "Ridge_MAE": st.column_config.NumberColumn("Ridge (MW)", format="%.1f"),
-                        "BiGRU_MAE": st.column_config.NumberColumn("BiGRU (MW)", format="%.1f"),
-                        "Wkday_MAE": st.column_config.NumberColumn("Wkday (MW)", format="%.1f"),
-                        "EqRNN_MAPE": st.column_config.NumberColumn("Eq-RNN MAPE", format="%.2f%%"),
+                        "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.1f"),
+                        "PT3_MAE": st.column_config.NumberColumn("PT-CM", format="%.1f"),
+                        "p_DM_EqRNN_vs_PT3": st.column_config.NumberColumn("DM p (RNN vs PT)", format="%.3f"),
+                        "BiGRU_MAE": st.column_config.NumberColumn("BiGRU", format="%.1f"),
+                        "Ridge_MAE": st.column_config.NumberColumn("Ridge", format="%.1f"),
+                        "Wkday_MAE": st.column_config.NumberColumn("Wkday", format="%.1f"),
                     },
                     hide_index=True,
                     height=340,
@@ -659,38 +673,39 @@ with tabs[2]:
             st.metric("Mean reported supply − demand", f"{ds_sub['Bal'].mean():+,.2f} MW", "Historical descriptive archive", delta_color="off", border=True)
 
 # ---------------------------------------------------------------------------
-# TAB 4: Multi-Horizon Hybrids & 5-Way Conformal Ablation
+# TAB 4: Multi-Horizon Convex Blend & 5-Way Conformal Ablation (With CIs!)
 # ---------------------------------------------------------------------------
 with tabs[3]:
-    st.subheader("Causal direct multi-horizon hybrids (1–30 days) & 5-way conformal ablation")
+    st.subheader("Causal multi-horizon convex blend (1–30 d) & 5-way conformal ablation with 95% CIs")
     col_mh, col_cp = st.columns([1.15, 1.05])
 
     with col_mh:
         with st.container(border=True):
-            st.markdown("**Direct horizons vs Climatology+Ridge-Residual Hybrid**")
+            st.markdown("**Direct horizons vs Climatology+Ridge Convex Blend & Refit Climatology**")
             st.caption(
-                "PatchTST-3× leads h = 1, 3, and 7 days. Beyond one week (without future NWP weather), unconstrained direct neural/Ridge models drift, "
-                "whereas the Climatology+Ridge-Residual Hybrid falls back gracefully to Climatology+Trend (1,070.8 MW at h=14; 1,071.9 MW at h=30)."
+                "Direct skill over climatology dissipates by about 7 days (h=7: 1,075–1,099 vs 1,072.5 MW). "
+                "The validation-tuned Climatology+Ridge convex blend beats all direct models at h = 3, 7, and 14 days and falls back to climatology at h = 30."
             )
             if not horizon_df.empty:
                 mh_l = horizon_df.melt(
                     id_vars=["Horizon_Days"],
-                    value_vars=["PT3_MAE", "EqRNN_MAE", "Clim_Resid_Hyb_MAE", "Clim_Trend_MAE", "Origin_Persist_MAE"],
+                    value_vars=["PT3_MAE", "Ridge_MAE", "Clim_Ridge_Blend_MAE", "Clim_Trend_MAE", "Clim_Refit_MAE", "Origin_Persist_MAE"],
                     var_name="Model",
                     value_name="MAE_MW",
                 )
                 mh_l["Model"] = mh_l["Model"].replace(
                     {
-                        "PT3_MAE": "PatchTST-3×",
-                        "EqRNN_MAE": "Equal-Wt RNN",
-                        "Clim_Resid_Hyb_MAE": "Clim+Ridge-Resid Hybrid",
+                        "PT3_MAE": "PatchTST-CM (3×)",
+                        "Ridge_MAE": "Direct Ridge (α_h)",
+                        "Clim_Ridge_Blend_MAE": "Clim.+Ridge Convex Blend",
                         "Clim_Trend_MAE": "Climatology+Trend",
+                        "Clim_Refit_MAE": "Climatology Refit (Tr+Val)",
                         "Origin_Persist_MAE": "Origin Persistence",
                     }
                 )
                 st.altair_chart(
                     alt.Chart(mh_l)
-                    .mark_line(point=True, strokeWidth=2.3)
+                    .mark_line(point=True, strokeWidth=2.2)
                     .encode(
                         x=alt.X("Horizon_Days:O", title="Forecast horizon (days)"),
                         y=alt.Y("MAE_MW:Q", title="Blind test MAE (MW)"),
@@ -701,67 +716,58 @@ with tabs[3]:
                 )
                 st.dataframe(
                     horizon_df[
-                        ["Horizon_Days", "PT3_MAE", "EqRNN_MAE", "Ridge_MAE", "Clim_Resid_Hyb_MAE", "Clim_Trend_MAE", "Origin_Persist_MAE"]
+                        ["Horizon_Days", "PT3_MAE", "Ridge_MAE", "Ridge_Alpha", "Blend_Weight_Ridge", "Clim_Ridge_Blend_MAE", "Clim_Trend_MAE", "Clim_Refit_MAE"]
                     ],
                     column_config={
-                        "Horizon_Days": st.column_config.NumberColumn("Horizon", format="%d d"),
-                        "PT3_MAE": st.column_config.NumberColumn("PT3", format="%.1f"),
-                        "EqRNN_MAE": st.column_config.NumberColumn("Eq-RNN", format="%.1f"),
+                        "Horizon_Days": st.column_config.NumberColumn("h", format="%d d"),
+                        "PT3_MAE": st.column_config.NumberColumn("PT-CM", format="%.1f"),
                         "Ridge_MAE": st.column_config.NumberColumn("Ridge", format="%.1f"),
-                        "Clim_Resid_Hyb_MAE": st.column_config.NumberColumn("Clim+Ridge Hyb", format="%.1f"),
-                        "Clim_Trend_MAE": st.column_config.NumberColumn("Clim+Trend", format="%.1f"),
-                        "Origin_Persist_MAE": st.column_config.NumberColumn("Persist", format="%.1f"),
+                        "Ridge_Alpha": st.column_config.NumberColumn("α_h", format="%.0f"),
+                        "Blend_Weight_Ridge": st.column_config.NumberColumn("w_h", format="%.2f"),
+                        "Clim_Ridge_Blend_MAE": st.column_config.NumberColumn("Blend", format="%.1f"),
+                        "Clim_Trend_MAE": st.column_config.NumberColumn("Clim", format="%.1f"),
+                        "Clim_Refit_MAE": st.column_config.NumberColumn("Refit", format="%.1f"),
                     },
                     hide_index=True,
                 )
 
     with col_cp:
         with st.container(border=True):
-            st.markdown("**5-way conformal ablation on untouched Val-Cal residuals**")
+            st.markdown("**5-way conformal ablation with 95% moving-block bootstrap CIs**")
             st.caption(
-                "Plain ACI minimizes proper Winkler score (−25.3% vs static; 2,404 MW mean width), "
-                "while LN-ACI achieves the tightest seasonal coverage uniformity (88.1%–90.1% across all four seasons, including 90.1% in Summer)."
+                "Plain ACI minimizes proper Winkler across both models and both nominal levels; LN-Static slightly edges LN-ACI on Winkler, "
+                "while seasonal coverage differences sit within ±4.0–7.8 pp bootstrap CIs."
             )
+            cp_model = st.segmented_control(
+                "Select base forecaster",
+                ["PatchTST-CM (3x)", "Ridge (14xF)"],
+                default="PatchTST-CM (3x)",
+                key="cp_model_sel",
+            ) or "PatchTST-CM (3x)"
             if not conformal_df.empty:
-                cp_model = st.segmented_control(
-                    "Select base forecaster",
-                    ["PatchTST-Ensemble (3x)", "Ridge (14xF)"],
-                    default="PatchTST-Ensemble (3x)",
-                    key="cp_model_sel",
-                )
-                sub_cp = conformal_df[conformal_df["Model"] == (cp_model or "PatchTST-Ensemble (3x)")]
+                sub_cp = conformal_df[conformal_df["Model"] == cp_model].copy()
+                sub_cp["PICP ± 95% CI"] = sub_cp.apply(lambda r: f"{r['PICP_%']:.1f}% ± {r['PICP_CI_hw']:.1f}", axis=1)
                 st.dataframe(
-                    sub_cp[["Method", "Nominal_%", "Mean_Width_MW", "PICP_%", "PINAW_%", "Winkler_MW"]],
+                    sub_cp[["Method", "Nominal_%", "Mean_Width_MW", "PICP ± 95% CI", "Winkler_MW"]],
                     column_config={
                         "Nominal_%": st.column_config.NumberColumn("Nom", format="%d%%"),
                         "Mean_Width_MW": st.column_config.NumberColumn("Width", format="%.0f MW"),
-                        "PICP_%": st.column_config.NumberColumn("PICP", format="%.1f%%"),
-                        "PINAW_%": st.column_config.NumberColumn("PINAW", format="%.1f%%"),
                         "Winkler_MW": st.column_config.NumberColumn("Winkler", format="%.0f MW"),
                     },
                     hide_index=True,
                     height=290,
                 )
             if not conf_sea_df.empty:
-                st.markdown("**90% PI seasonal coverage & width breakdown (PatchTST-3×)**")
+                st.markdown(f"**Seasonal 90% PICP (± 95% CI) & Summer width ({cp_model})**")
+                sub_s = conf_sea_df[conf_sea_df["Model"] == cp_model].copy()
+                sub_s["Summer"] = sub_s.apply(lambda r: f"{r['Summer_PICP_%']:.1f}% ± {r['Summer_CI_hw']:.1f}", axis=1)
+                sub_s["Winter"] = sub_s.apply(lambda r: f"{r['Winter_PICP_%']:.1f}% ± {r['Winter_CI_hw']:.1f}", axis=1)
                 st.dataframe(
-                    conf_sea_df[
-                        [
-                            "Method",
-                            "Overall_PICP_%",
-                            "Winter_PICP_%",
-                            "PostMon_PICP_%",
-                            "Monsoon_PICP_%",
-                            "Summer_PICP_%",
-                            "Summer_Width_MW",
-                        ]
-                    ],
+                    sub_s[["Method", "Overall_PICP_%", "Winter", "PostMon_PICP_%", "Monsoon_PICP_%", "Summer", "Summer_Width_MW"]],
                     column_config={
                         "Overall_PICP_%": st.column_config.NumberColumn("All", format="%.1f%%"),
-                        "Winter_PICP_%": st.column_config.NumberColumn("Win", format="%.1f%%"),
                         "PostMon_PICP_%": st.column_config.NumberColumn("Post", format="%.1f%%"),
                         "Monsoon_PICP_%": st.column_config.NumberColumn("Mon", format="%.1f%%"),
-                        "Summer_PICP_%": st.column_config.NumberColumn("Sum", format="%.1f%%"),
                         "Summer_Width_MW": st.column_config.NumberColumn("Sum W", format="%.0f"),
                     },
                     hide_index=True,
@@ -771,23 +777,23 @@ with tabs[3]:
 # TAB 5: Direct Merged-Block Permutation Importance & Thermal Response
 # ---------------------------------------------------------------------------
 with tabs[4]:
-    st.subheader("Direct group permutation importance on PatchTST-3× & detrended thermal response")
+    st.subheader("Direct group permutation importance on PatchTST-CM (3×) & detrended thermal response")
     st.caption(
-        "Explains deployed PatchTST-Ensemble (3×) directly (15 repeats across all 14 lookback steps) with a merged Autoregressive Load History block "
+        "Explains deployed PatchTST-CM (3×) directly (15 repeats across all 14 lookback steps) with a merged Autoregressive Load History block "
         "(k = 43 national + divisional load features) to avoid splitting collinear lag signals."
     )
 
     col_p1, col_p2 = st.columns([1.05, 1.15])
     with col_p1:
         with st.container(border=True):
-            st.markdown("**PatchTST-3× ΔMAE upon causal block permutation (MW)**")
+            st.markdown("**PatchTST-CM (3×) ΔMAE upon causal block permutation (MW)**")
             if not perm_df.empty:
                 ps = perm_df.sort_values("Delta_MAE_Mean_MW", ascending=False).copy()
                 st.altair_chart(
                     alt.Chart(ps)
                     .mark_bar(cornerRadiusEnd=4, color="#0D9488")
                     .encode(
-                        x=alt.X("Delta_MAE_Mean_MW:Q", title="Increase in PatchTST-3× MAE (MW)"),
+                        x=alt.X("Delta_MAE_Mean_MW:Q", title="Increase in PatchTST-CM (3×) MAE (MW)"),
                         y=alt.Y("Feature_Group:N", sort=ps["Feature_Group"].tolist(), title=None),
                         tooltip=[
                             "Feature_Group:N",
@@ -892,7 +898,7 @@ with tabs[6]:
             dow = st.selectbox("Day of week", ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"], index=2)
             season_sel = st.selectbox("Season (sets adaptive conformal width)", ["Summer (Mar–May)", "Monsoon (Jun–Sep)", "Winter (Dec–Feb)", "Post-Monsoon (Oct–Nov)"])
             cal_regime = st.selectbox("Calendar regime", ["Regular working day", "Single-day public holiday", "Eid / continuous festival window", "Ramadan evening peak"])
-            cp_mode = st.segmented_control("Conformal wrapper", ["Plain ACI (tighter Winkler)", "LN-ACI (uniform seasonal PICP)"], default="LN-ACI (uniform seasonal PICP)", key="sim_cp_mode")
+            cp_mode = st.segmented_control("Conformal wrapper", ["Plain ACI (lowest Winkler)", "LN-ACI (narrowest seasonal spread)"], default="LN-ACI (narrowest seasonal spread)", key="sim_cp_mode")
 
     cdd25 = max(0.0, dhaka_temp - 25.0)
     day_adj = {"Friday": -780.0, "Saturday": -240.0, "Sunday": 110.0, "Monday": 160.0, "Tuesday": 220.0, "Wednesday": 180.0, "Thursday": 90.0}[dow]
@@ -900,11 +906,11 @@ with tabs[6]:
     sim_mw = float(np.clip(0.84 * prev_peak + 0.16 * 12800.0 + cdd25 * 115.0 + day_adj + hol_adj - 320.0, 7000.0, 19500.0))
 
     if (cp_mode or "").startswith("Plain"):
-        aci_half = {"Summer (Mar–May)": 1419.5, "Monsoon (Jun–Sep)": 1185.0, "Winter (Dec–Feb)": 1018.5, "Post-Monsoon (Oct–Nov)": 983.5}[season_sel]
-        cov_note = "Plain ACI: lowest proper Winkler (3,636 MW; 88.1% overall / 84.6% Summer PICP)."
+        aci_half = {"Summer (Mar–May)": 1460.0, "Monsoon (Jun–Sep)": 1205.0, "Winter (Dec–Feb)": 1025.0, "Post-Monsoon (Oct–Nov)": 990.0}[season_sel]
+        cov_note = "Plain ACI: lowest proper Winkler (3,674 MW; 88.1% ± 3.4 pp overall / 84.6% ± 5.6 pp Summer PICP)."
     else:
-        aci_half = {"Summer (Mar–May)": 2025.0, "Monsoon (Jun–Sep)": 1260.0, "Winter (Dec–Feb)": 1044.5, "Post-Monsoon (Oct–Nov)": 890.5}[season_sel]
-        cov_note = "LN-ACI: tightest seasonal coverage uniformity (88.1%–90.1% across all four seasons; 90.1% Summer PICP)."
+        aci_half = {"Summer (Mar–May)": 1885.0, "Monsoon (Jun–Sep)": 1245.0, "Winter (Dec–Feb)": 1055.0, "Post-Monsoon (Oct–Nov)": 910.0}[season_sel]
+        cov_note = "LN-ACI: narrowest seasonal coverage spread (87.8%–90.1% across all 4 seasons; 90.1% ± 4.3 pp Summer PICP)."
 
     with col_out:
         with st.container(border=True):
@@ -915,9 +921,9 @@ with tabs[6]:
             st.caption(f"Detrended subtropical CDD (base 25.0 °C): **{cdd25:.1f} °C** · {cov_note}")
 
     with st.container(border=True):
-        st.markdown("**Revised Q1 manuscript package (Elsevier `elsarticle 5p,twocolumn`)**")
+        st.markdown("**Revised v4 Q1 manuscript package (Elsevier `elsarticle 5p,twocolumn`)**")
         st.markdown(
-            "- **16 tables, 14 vector PDF figures, 41 verified references** — complete Round-2 revision (95% Hansen MCS, 24-model equalized suite, 5-way conformal ablation, Appendix A QA).\n"
+            "- **17 tables (incl. Appendix B per-seed breakdown), 14 vector PDF figures, 42 verified references** — complete v4 revision (25-model MCS, 5-seed rolling CV with Δy & RevIN controls, 5-way conformal with block-bootstrap CIs, operational audits).\n"
             "- **Open repository:** [github.com/mubtasimfuad7/Bangladesh-Peak-Demand-Forecasting](https://github.com/mubtasimfuad7/Bangladesh-Peak-Demand-Forecasting)"
         )
         if PAPER_ZIP_PATH.exists():

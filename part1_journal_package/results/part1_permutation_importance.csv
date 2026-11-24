@@ -1,6 +1,6 @@
 Feature_Group,Num_Features,Delta_MAE_Mean_MW,Delta_MAE_Std_MW
-Autoregressive Load History (National + Divisional),43,1544.8335774739583,73.91294410329037
-Day-of-Week & Monthly Seasonality,7,151.73501790364583,13.089179644355927
-Holiday & Eid Lead/Lag Flags,52,26.6746826171875,6.4628128117395764
-Ambient Temperature & Detrended CDD (25°C),11,11.756514485677084,3.8855030952268894
-Generation Constraints & Plant Maintenance,4,3.0699503580729166,5.228954942782036
+Autoregressive Load History (National + Divisional),43,1557.8139485677084,73.39774313808115
+Day-of-Week & Monthly Seasonality,7,151.11280517578126,12.43110089452036
+Holiday & Eid Lead/Lag Flags,52,30.84896240234375,6.949058938744758
+Ambient Temperature & Detrended CDD (25°C),11,11.333837890625,4.124518620656652
+Generation Constraints & Plant Maintenance,4,0.6170003255208333,6.373758782925049

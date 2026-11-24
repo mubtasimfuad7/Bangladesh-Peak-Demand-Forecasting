@@ -1,31 +1,30 @@
 # Bangladesh Peak Electricity Demand Forecasting (Q1 Journal Benchmark)
 
-Reproducible multi-seed benchmark of **24 statistical, linear, differenced-tree, MLP, channel-independent DLinear, patched-Transformer, and recurrent architectures** with a **5-way adaptive conformal prediction ablation** on 6.5 years of daily operational records from the Bangladesh Power Development Board (BPDB, Nov 2019 – Jun 2026).
+Reproducible multi-seed benchmark of **25 statistical, linear, differenced-tree, MLP, channel-independent DLinear, channel-mixing & RevIN patched-Transformer, and recurrent architectures** with a **5-way adaptive conformal prediction ablation** on 6.5 years of daily operational records from the Bangladesh Power Development Board (BPDB, Nov 2019 – Jun 2026).
 
-## Headline Verified Findings
+## Headline Verified Findings (v4 Revision)
 
-- **Tied Leading Group inside the 95% Hansen Model Confidence Set (Mar 2025 – Jun 2026, 462 blind test days, 5 seeds, raw `Year` dropped, train-only scaling, separated `Val-ES` / `Val-Cal`, 14-day embargoes):**
-  - **PatchTST-Ensemble (3×)** (channel-mixing, no RevIN, `366,147` params, `1.40 MiB`, `1.05 ms` CPU): **`584.20 ± 10.71 MW` MAE**, **`841.60 ± 7.78 MW` RMSE**, `4.40%` MAPE, **`+7.8%` Skill vs. Weekday-Adjusted Persistence** (`p_MCS = 1.000` on MAE & RMSE).
-  - **PatchTST-Diff (`Δy`, 3×):** `589.61 ± 6.23 MW` MAE, `890.85 MW` RMSE (`+6.9%` skill).
-  - **Val-Opt RNN Ensemble:** `599.62 ± 13.50 MW` MAE, `846.25 MW` RMSE (`+5.3%` skill).
-  - **Ridge (`14 × 117`, `α = 10`):** `602.29 MW` MAE, `862.98 MW` RMSE (`+4.9%` skill, `1,639` params, `6.40 KiB` fp32, `0.05 ms` CPU).
-  - **Equal-Weight RNN Ens (`1/3` each):** `603.23 ± 6.66 MW` MAE, `845.23 MW` RMSE (`+4.8%` skill, half the cross-seed SD of SLSQP).
-  - **Ridge-Diff (`Δy`, `α = 10`):** `607.07 MW` MAE, `872.05 MW` RMSE (`+4.2%` skill).
-  - **HLN-DM (`Ref = PatchTST-3×`, Holm–Bonferroni):** Significantly beats `14/23` baselines on Seed 42 (`p_Holm ≤ 0.018`), while differences vs. `Ridge` (`p_Holm = 0.407 / 1.000`) and `Equal-Weight RNN` (`0.407 / 1.000`) are statistically non-significant.
-  - **Standard CI-DLinear, MLP & Differenced Trees:** Standard univariate `DLinear (CI)` (`30` params, `0.12 KiB`) reaches `698.29 ± 2.74 MW`; `MLP` (`218k` params) reaches `719.51 ± 71.21 MW`; `XGBoost-Diff (Δy)` cuts level-XGBoost error by **`21.5%` overall** (`819.35 → 642.90 MW`) and **`44.2%` on `>15 GW` peaks** (`1,084.8 → 605.8 MW`).
-- **3-Fold Expanding-Window Rolling-Origin CV (2023–2026) & Within-Period Sensitivity Curve:**
-  - **3-Fold Mean:** **Weekday-Adjusted Persistence (`551.01 MW`)** > **Ridge-Diff (`562.76 MW`)** > **Ridge (`565.54 MW`)** > SARIMAX (`599.35 MW`) > XGBoost-Diff (`609.93 MW`) > Equal-Weight RNN (`662.96 MW`) > PatchTST-3× (`696.05 MW`, due to Fold-1 2023 degradation `907.72 MW`).
-  - **Within-Period History Sensitivity (2025–26 fixed, `1.5–4.5 yr`):** SARIMAX plateaus near `651 MW`, whereas `PatchTST-3×` (`633.8 → 584.2 MW`), `Ridge` (`762.0 → 602.3 MW`), and `Equal-Weight RNN` (`739.6 → 603.2 MW`) improve monotonically.
-- **5-Way Conformal Uncertainty Ablation on Untouched `Val-Cal` Residuals (`PatchTST-3×` & `Ridge`):**
-  - Static Split Conformal fails under mild-to-hot shift (`70.8%` PICP at 90% nominal; `53.1%` in Summer; Winkler `4,869 MW`).
-  - **Plain ACI** minimizes proper Winkler score (**`3,636 MW`**, `−25.3%` vs. static; `88.1%` PICP, `2,404 MW` mean width; `3,702 MW` on Ridge).
-  - **LN-ACI** achieves the tightest seasonal coverage uniformity across all four seasons (**`88.1%–90.1%`**, lifting Summer PICP to **`90.1%`**; `89.4%` overall on `PatchTST-3×`, `89.6%` on `Ridge`, `2,878 MW` mean width).
-- **Regimes, Same-Split 8 Divisions, Multi-Horizon Hybrids & Direct Explainability:**
-  - **Holiday / Eid (`n = 41`):** **`Ridge` leads (`867.9 MW`)** ahead of `Equal-Weight RNN` (`892.6 MW`), `XGBoost-Diff` (`894.1 MW`), and `PatchTST-3×` (`926.7 MW`).
-  - **Same-Split 8-Division:** **`Equal-Weight RNN` beats `PatchTST-3×` in `8/8` divisions** and leads 5 regional grids, while `Ridge` / `Weekday Persistence` tie or edge ahead in Dhaka and Chattogram.
-  - **Causal Direct Multi-Horizon (`h = 1..30` days):** `PatchTST-3×` leads `h = 1, 3, 7` days; beyond one week, a **`Climatology+Ridge-Residual` hybrid** falls back gracefully to `Climatology+Trend` (`1,070.8 MW` at `h = 14`; `1,071.9 MW` at `h = 30`) instead of drifting.
-  - **Direct Merged-Block Permutation Importance (`PatchTST-3×`):** `Autoregressive Load History (k = 43): +1,544.8 MW`, `DOW/Month: +151.7 MW`, `Holiday/Eid: +26.7 MW`, `Temp & Detrended CDD_25: +11.8 MW` (detrended `τ* = 25.0 °C`, `+387.2 MW/°C`).
-  - **Robust Data QA (Appendix A):** Audited `20` missing calendar days, `16` negative metering inversions, and `3` upper IQR spikes `> 1,168 MW` (`robust_mean = 508.31 MW`, `median = 510.0 MW`, `IQR = 188.0 MW`).
+- **25-Model, 5-Seed Blind Test (Mar 2025 – Jun 2026, `n = 462` days, raw `Year` dropped, train-only scaling, separated `Val-ES` / `Val-Cal`, 14-day embargoes):**
+  - **`PatchTST-CM (3×)`** (channel-mixing, no RevIN, `366,147` params, `1.40 MiB`, `0.72 ms` Apple M1 CPU): **`576.94 ± 4.01 MW` MAE**, **`838.00 ± 6.70 MW` RMSE**, `4.35%` MAPE, **`+8.9%` Skill vs. Weekday-Adjusted Persistence** (`633.43 MW`; descriptive HLN-DM `p_Holm = 0.048` Seed 42, `0.014` 5-seed).
+  - **`PatchTST-CM-Diff (Δy, 3×)`:** `591.67 ± 4.64 MW` MAE (`+6.6%` skill).
+  - **`Equal-Weight RNN Ens` (`1/3` each):** `596.29 ± 10.73 MW` MAE, `844.81 MW` RMSE (`+5.9%` skill — beats `Val-Opt RNN Ensemble` `597.15 ± 11.81 MW` on MAE, RMSE, and SD).
+  - **`Ridge (14 × 117, α = 10)`:** `602.29 MW` MAE, `862.98 MW` RMSE (`+4.9%` skill, `1,639` params, `6.40 KiB` fp32, `0.04 ms` CPU).
+  - **Faithful univariate `PatchTST-RevIN (CI, 3×)`:** `667.99 ± 11.20 MW` (`−30.9 MW` ahead of univariate `DLinear (CI)` `698.84 ± 3.32 MW`).
+  - **Low-Power 95% Hansen MCS:** Excludes only `2` of `48` model–loss entries among the top 12 models (`Weekday-Adj Persistence` on RMSE only; it stays in on MAE `p_MCS = 0.196 / 0.089`), confirming limited discrimination power at `n = 462` days.
+- **Uniform 5-Seed 3-Fold Rolling-Origin CV (2023–2026) with Level-Shift Controls:**
+  - Level `PatchTST-CM (3×)` degrades in Fold 1 (2023: `909.12 ± 113.29 MW`; 3-fold mean `693.11 MW`).
+  - Faithful **`PatchTST-RevIN (CI, 3×)`** cuts Fold 1 by `−345.9 MW` to `563.24 ± 4.89 MW` (3-fold mean `611.05 MW`).
+  - **`PatchTST-CM-Diff (Δy, 3×)`** cuts Fold 1 by `−392.8 MW` to `516.32 ± 17.02 MW`, wins Fold 2 (`530.79 ± 2.86 MW`), and achieves the **lowest 3-fold mean of any model (`546.26 MW`)**, ahead of Weekday Persistence (`551.01 MW`), `Ridge-Diff` (`562.76 MW`), `Ridge` (`565.54 MW`), and `SARIMAX` (`599.35 MW`).
+- **5-Way Conformal Ablation with 95% Moving-Block Bootstrap CIs (`PatchTST-CM` & `Ridge`, 80% & 90%):**
+  - Static 90% intervals cover `70.8% ± 5.6 pp` (`53.7%` Summer, Winkler `4,892 MW`).
+  - **`Plain ACI`** achieves the lowest Winkler across both models and both nominal levels (**`3,674 MW`**, `−24.9%`, `2,450 MW` width on `PatchTST-CM`; **`3,702 MW`**, `2,385 MW` width on `Ridge`).
+  - **`LN-Static`** (`3,921 / 3,788 MW` Winkler) and **`LN-ACI`** (`3,940 / 3,864 MW`, `87.8%–90.1%` across all four seasons, seasonal 95% CIs `±4.3–7.8 pp`) are nearly tied.
+- **Downstream Analyses & Operational Audits:**
+  - **Architecture-Dependent PCA Ablation:** 95% PCA degrades `PatchTST-CM` (`+79.5 MW`, `p = 0.001`) and `Ridge` (`+33.5 MW`) while leaving `Equal-Weight RNN` unchanged (`596.3 → 597.5 MW`, `p = 0.333`).
+  - **Prior-Day `y(t−1)` Demand Bins & Holiday Paired Tests:** Removing target-selection bias puts `PatchTST-CM (3×)` first in `>15 GW` (`613.5` vs. `635.0 MW` Wkday Persist). Holiday/Eid differences (`n = 41`: `Ridge 867.9` vs. `PT-CM 910.9 MW`, `p = 0.366`) are not statistically significant.
+  - **Same-Split 8 Divisions (5 Seeds + Paired DM):** `Equal-Weight RNN` significantly beats `PatchTST-CM (3×)` in `7/8` divisions (`p < 0.05`; Rajshahi `p = 0.379` ns), while `Ridge` / `Weekday Persistence` lead Dhaka and Chattogram.
+  - **Multi-Horizon Convex Blend (`1–30 d`):** Direct skill over climatology dissipates by `h ≈ 7 d`; a validation-tuned `Climatology+Ridge` convex blend reaches `848.3 MW` (`h = 3`), `1,007.4 MW` (`h = 7`), `1,011.8 MW` (`h = 14`), and `1,071.9 MW` (`h = 30`).
+  - **Protocol Audits:** Calendar-gap audit (`420` clean vs. `42` gap-spanning test windows), Eid `±1`-day lunar-sighting jitter (`+27–36 MW` on `+1 d` late shift), and full-year 2024 summer-inclusive validation sensitivity (`Ridge α = 10` unchanged; `PatchTST-CM` selects `lr = 2.5e-3 → 564.9 MW`).
 
 ## Reproducing All Experiments & Dashboard
 

@@ -1,4 +1,7 @@
 {
+  "cpu_hardware": "Apple M1 (8-core ARM64)",
+  "torch_threads": 2,
+  "blas_threads": 1,
   "n_clean": 2380,
   "n_features": 117,
   "year_dropped": true,
@@ -8,15 +11,16 @@
   "ridge_alpha": 10.0,
   "ridge_diff_alpha": 10.0,
   "tuned_neural_lrs": {
-    "DLinear (CI)": 0.005,
+    "DLinear (CI)": 0.01,
     "MLP (14xF)": 0.001,
-    "PatchTST": 0.001,
+    "PatchTST-CM (Single)": 0.001,
+    "PatchTST-RevIN (Single)": 0.001,
     "BiGRU": 0.0025,
-    "BiLSTM": 0.001,
+    "BiLSTM": 0.0025,
     "BiLSTM-Attention": 0.0025,
     "Transformer": 0.0025,
     "CNN-BiGRU-Transformer": 0.0025,
-    "PatchTST-Diff (3x)": 0.001
+    "PatchTST-CM-Diff (3x)": 0.001
   },
   "n_train": 1652,
   "n_val_total": 224,
@@ -31,44 +35,47 @@
     999
   ],
   "wkday_persist_mae": 633.43,
-  "pt3_s42_mae": 577.37,
-  "pt3_5seed_mae": 580.92,
+  "pt3_s42_mae": 583.61,
+  "pt3_5seed_mae": 574.08,
   "learned_weights_per_seed": {
     "42": [
-      0.0394,
-      0.4614,
-      0.4992
+      0.0,
+      0.6741,
+      0.3259
     ],
     "123": [
-      0.6497,
-      0.3503,
-      0.0
+      0.5156,
+      0.1727,
+      0.3116
     ],
     "7": [
-      0.62,
-      0.1857,
-      0.1943
+      0.1753,
+      0.8247,
+      0.0
     ],
     "2024": [
-      0.3605,
-      0.0981,
-      0.5414
+      0.6465,
+      0.3535,
+      0.0
     ],
     "999": [
-      0.0216,
-      0.2931,
-      0.6854
+      0.0,
+      0.799,
+      0.201
     ]
   },
   "learned_weights_mean": [
-    0.3382,
-    0.2777,
-    0.3841
+    0.2675,
+    0.5648,
+    0.1677
   ],
   "data_qa": {
     "calendar_span_days": 2414,
     "raw_records": 2394,
     "missing_calendar_days": 20,
+    "val_es_gap_spanning_windows": 10,
+    "val_cal_gap_spanning_windows": 0,
+    "test_gap_spanning_windows": 42,
     "negative_loss_records": 16,
     "upper_outlier_loss_records": 3,
     "upper_iqr_cutoff_mw": 1168.0,
@@ -81,17 +88,17 @@
     "SARIMAX": {
       "Params": 8,
       "Size_KiB": 0.031,
-      "CPU_ms": 0.37
+      "CPU_ms": 0.38
     },
     "Ridge (14xF)": {
       "Params": 1639,
       "Size_KiB": 6.4,
-      "CPU_ms": 0.05
+      "CPU_ms": 0.04
     },
     "Ridge-Diff (\u0394y)": {
       "Params": 1639,
       "Size_KiB": 6.4,
-      "CPU_ms": 0.05
+      "CPU_ms": 0.04
     },
     "XGBoost (Level)": {
       "Params": 0,
@@ -116,57 +123,67 @@
     "MLP (14xF)": {
       "Params": 218113,
       "Size_KiB": 852.0,
-      "CPU_ms": 0.04
+      "CPU_ms": 0.03
     },
-    "PatchTST": {
+    "PatchTST-CM (Single)": {
       "Params": 122049,
       "Size_KiB": 476.75,
-      "CPU_ms": 0.35
+      "CPU_ms": 0.24
+    },
+    "PatchTST-RevIN (Single)": {
+      "Params": 68035,
+      "Size_KiB": 265.76,
+      "CPU_ms": 0.25
     },
     "BiGRU": {
       "Params": 299905,
       "Size_KiB": 1171.5,
-      "CPU_ms": 0.36
+      "CPU_ms": 0.35
     },
     "BiLSTM": {
       "Params": 323329,
       "Size_KiB": 1263.0,
-      "CPU_ms": 0.38
+      "CPU_ms": 0.37
     },
     "BiLSTM-Attention": {
       "Params": 168019,
       "Size_KiB": 656.32,
-      "CPU_ms": 0.48
+      "CPU_ms": 0.44
     },
     "Transformer": {
       "Params": 189441,
       "Size_KiB": 740.0,
-      "CPU_ms": 0.26
+      "CPU_ms": 0.25
     },
     "CNN-BiGRU-Transformer": {
       "Params": 42817,
       "Size_KiB": 167.25,
-      "CPU_ms": 0.96
+      "CPU_ms": 0.44
     },
-    "PatchTST-Ensemble (3x)": {
+    "PatchTST-CM (3x)": {
       "Params": 366147,
       "Size_KiB": 1430.26,
-      "CPU_ms": 1.05
+      "CPU_ms": 0.72
     },
-    "PatchTST-Diff (\u0394y, 3x)": {
+    "PatchTST-RevIN (CI, 3x)": {
+      "Params": 204105,
+      "Size_KiB": 797.29,
+      "CPU_ms": 0.75
+    },
+    "PatchTST-CM-Diff (\u0394y, 3x)": {
       "Params": 366147,
       "Size_KiB": 1430.26,
-      "CPU_ms": 1.05
+      "CPU_ms": 0.72
     },
     "Equal-Weight RNN Ens": {
       "Params": 791253,
       "Size_KiB": 3090.83,
-      "CPU_ms": 1.22
+      "CPU_ms": 1.16
     },
     "Val-Opt RNN Ensemble": {
       "Params": 791253,
       "Size_KiB": 3090.83,
-      "CPU_ms": 1.22
+      "CPU_ms": 1.16
     }
   }
 }
