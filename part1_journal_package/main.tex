@@ -31,11 +31,7 @@
 \address[nsu]{Department of Electrical and Computer Engineering, North South University, Bashundhara, Dhaka 1229, Bangladesh}
 
 \begin{abstract}
-We benchmark 25 forecasting models and five conformal wrappers on 6.5 years of daily evening peak demand records (2,394 reports over 2,414 calendar days, November 2019--June 2026) from the Bangladesh Power Development Board, using train-only scaling, 14-day split embargoes, separate early-stopping and calibration blocks, no raw year index, and a detrended cooling threshold ($25^\circ\text{C}$).
-
-On the 462-day test set (March 2025--June 2026), channel-mixing \texttt{PatchTST-CM (3$\times$)} (no RevIN) attains the lowest mean error ($576.9 \pm 4.0$\,MW MAE), an 8.9\% gain over weekday-adjusted persistence (633.4\,MW; descriptive HLN-DM $p_{\text{Holm}} = 0.048$ Seed~42, $0.014$ 5-seed). \texttt{PatchTST-CM-Diff} (591.7\,MW), \texttt{Equal-Weight RNN} (596.3\,MW), \texttt{Val-Opt RNN} (597.2\,MW), and \texttt{Ridge} (602.3\,MW) are statistically indistinguishable from it ($p_{\text{Holm}} \ge 0.468$). The 95\% Model Confidence Set excludes only 2 of 48 top-12 entries, leaving weekday persistence inside under both MAE configurations ($p_{\text{MCS}} = 0.196 / 0.089$) and indicating limited discrimination power at this sample size. Across 5-seed 3-fold rolling CV (2023--2026), level \texttt{PatchTST-CM} degrades in 2023 (909.1\,MW; mean 693.1\,MW), whereas first-differenced \texttt{PatchTST-CM-Diff} cuts 2023 error to 516.3\,MW and leads the 3-fold mean (546.3\,MW), ahead of weekday persistence (551.0\,MW), \texttt{Ridge-Diff} (562.8\,MW), and faithful \texttt{PatchTST-RevIN} (611.1\,MW).
-
-For 90\% intervals, static split conformal covers $70.8\% \pm 5.6$\,pp ($53.7\%$ summer). Plain ACI minimizes Winkler (3,674\,MW, $-24.9\%$, 2,450\,MW width), while locally normalized ACI gives the narrowest seasonal spread ($87.8$--$90.1\%$, 95\% CIs $\pm 4.3$--$7.8$\,pp, 2,862\,MW width). Past $\sim$7 days, direct skill over climatology dissipates ($h=7$: 1,075--1,099 vs. 1,072.5\,MW), whereas a climatology--Ridge convex blend reaches 848.3\,MW ($h=3$) and 1,007.4\,MW ($h=7$). Code and data are public.
+We benchmark 25 forecasting models and five conformal wrappers on 6.5 years of Bangladesh Power Development Board daily evening peak demand records (2,394 reports over 2,414 calendar days, November 2019--June 2026), using train-only scaling, 14-day split embargoes, separate early-stopping and calibration blocks, no raw year index, and a detrended cooling threshold ($25^\circ\text{C}$). On the 462-day test set (March 2025--June 2026), channel-mixing \texttt{PatchTST-CM (3$\times$)} (no RevIN) achieves the lowest mean error ($576.9 \pm 4.0$\,MW MAE; $+8.9\%$ vs. weekday-adjusted persistence at 633.4\,MW; descriptive HLN-DM $p_{\text{Holm}} = 0.048$ Seed~42, $0.014$ 5-seed), while \texttt{PatchTST-CM-Diff} (591.7\,MW), \texttt{Equal-Weight RNN} (596.3\,MW), \texttt{Val-Opt RNN} (597.2\,MW), and \texttt{Ridge} (602.3\,MW) are statistically indistinguishable ($p_{\text{Holm}} \ge 0.468$). The 95\% Model Confidence Set excludes only 2 of 48 top-12 entries and keeps weekday persistence inside on MAE ($p_{\text{MCS}} = 0.196 / 0.089$), indicating limited discrimination power at this sample size. Across uniform 5-seed 3-fold rolling CV (2023--2026), level \texttt{PatchTST-CM} degrades in 2023 (909.1\,MW; mean 693.1\,MW), whereas first-differenced \texttt{PatchTST-CM-Diff} cuts 2023 error to 516.3\,MW and leads the 3-fold mean (546.3\,MW), ahead of weekday persistence (551.0\,MW), \texttt{Ridge-Diff} (562.8\,MW), and faithful \texttt{PatchTST-RevIN} (611.1\,MW). For 90\% intervals, static split conformal covers $70.8\% \pm 5.6$\,pp ($53.7\%$ summer), Plain ACI minimizes Winkler (3,674\,MW, $-24.9\%$, 2,450\,MW width), and locally normalized ACI gives the narrowest seasonal spread ($87.8$--$90.1\%$, 2,862\,MW width). Past $\sim$7 days, direct skill over climatology dissipates ($h=7$: 1,075--1,099 vs. 1,072.5\,MW), while a climatology--Ridge convex blend reaches 848.3\,MW ($h=3$) and 1,007.4\,MW ($h=7$). Code and data are public.
 \end{abstract}
 
 \begin{keyword}
@@ -318,7 +314,11 @@ XGBoost-Diff ($\Delta y$) & 642.90 & $-$59.30 & $0.120$ & 642.90 & $-$68.82 & $0
 Weekday-Adj. Persistence & 633.43 & $-$49.83 & $0.048$ & 633.43 & $-$59.35 & $0.014$ & $[-101.2, -21.0]$ \\
 Hybrid BiGRU-XGBoost & 617.53 & $-$33.93 & $0.396$ & 622.29 & $-$48.21 & $0.044$ & $[-76.6, -15.0]$ \\
 Ridge-Diff ($\Delta y$) & 607.07 & $-$23.47 & $0.898$ & 607.07 & $-$32.99 & $0.346$ & $[-64.6, +0.9]$ \\
+Hybrid BiLSTM-Attn-XGB & 620.86 & $-$37.25 & $0.898$ & 606.95 & $-$32.87 & $0.831$ & $[-72.6, +6.4]$ \\
 Ridge ($14 \times 117$) & 602.29 & $-$18.68 & $0.898$ & 602.29 & $-$28.21 & $0.468$ & $[-58.0, +1.5]$ \\
+BiGRU & 604.17 & $-$20.57 & $0.898$ & 601.78 & $-$27.70 & $0.260$ & $[-50.1, -1.8]$ \\
+BiLSTM & 608.47 & $-$24.87 & $0.898$ & 600.45 & $-$26.37 & $0.759$ & $[-55.0, +5.5]$ \\
+BiLSTM-Attention & 615.06 & $-$31.45 & $0.898$ & 596.46 & $-$22.38 & $1.000$ & $[-54.9, +10.7]$ \\
 PatchTST-CM-Diff ($\Delta y$, 3$\times$) & 586.70 & $-$3.10 & $1.000$ & 590.55 & $-$16.47 & $1.000$ & $[-51.0, +14.8]$ \\
 Equal-Weight RNN Ens & 588.55 & $-$4.94 & $1.000$ & 588.51 & $-$14.43 & $1.000$ & $[-39.6, +11.2]$ \\
 Val-Opt RNN Ensemble & 597.44 & $-$13.84 & $1.000$ & 583.40 & $-$9.32 & $1.000$ & $[-34.0, +16.9]$ \\
@@ -462,17 +462,17 @@ Tables~\ref{tab:conformal}--\ref{tab:conformal_seasonal} and Fig.~\ref{fig:confo
 \toprule
 \textbf{Model} & \textbf{90\% Conformal Method} & \textbf{Overall (\%)} & \textbf{Winter ($n=90$)} & \textbf{Post-Mon ($n=59$)} & \textbf{Monsoon ($n=151$)} & \textbf{Summer ($n=162$)} & \textbf{Summer Width (MW)} \\
 \midrule
-\multirow{5}{*}{PatchTST-CM (3$\times$)} & 1. Static Split & 70.8 $\pm$ 5.6 & 86.7 $\pm$ 11.1 & 78.0 & 76.8 & 53.7 $\pm$ 8.0 & 1,362 \\
- & 2. Rolling-Window (120d) & 86.6 $\pm$ 4.0 & 91.1 $\pm$ 10.0 & 89.8 & 96.0 & 74.1 $\pm$ 7.7 & 2,261 \\
- & 3. Locally Norm. Static & 92.4 $\pm$ 2.9 & 91.1 $\pm$ 7.2 & 94.9 & 93.4 & 91.4 $\pm$ 4.9 & 3,822 \\
- & 4. Plain ACI & 88.1 $\pm$ 3.4 & 90.0 $\pm$ 7.8 & 86.4 & 91.4 & 84.6 $\pm$ 5.6 & 2,920 \\
- & 5. LN-ACI & 89.2 $\pm$ 2.8 & 87.8 $\pm$ 7.8 & 88.1 & 89.4 & 90.1 $\pm$ 4.3 & 3,770 \\
+\multirow{5}{*}{PatchTST-CM (3$\times$)} & 1. Static Split & 70.8 $\pm$ 5.6 & 86.7 $\pm$ 11.1 & 78.0 $\pm$ 8.5 & 76.8 $\pm$ 8.3 & 53.7 $\pm$ 8.0 & 1,362 \\
+ & 2. Rolling-Window (120d) & 86.6 $\pm$ 4.0 & 91.1 $\pm$ 10.0 & 89.8 $\pm$ 5.1 & 96.0 $\pm$ 4.0 & 74.1 $\pm$ 7.7 & 2,261 \\
+ & 3. Locally Norm. Static & 92.4 $\pm$ 2.9 & 91.1 $\pm$ 7.2 & 94.9 $\pm$ 4.2 & 93.4 $\pm$ 5.3 & 91.4 $\pm$ 4.9 & 3,822 \\
+ & 4. Plain ACI & 88.1 $\pm$ 3.4 & 90.0 $\pm$ 7.8 & 86.4 $\pm$ 6.8 & 91.4 $\pm$ 5.3 & 84.6 $\pm$ 5.6 & 2,920 \\
+ & 5. LN-ACI & 89.2 $\pm$ 2.8 & 87.8 $\pm$ 7.8 & 88.1 $\pm$ 6.8 & 89.4 $\pm$ 5.0 & 90.1 $\pm$ 4.3 & 3,770 \\
 \midrule
-\multirow{5}{*}{Ridge ($14 \times 117$)} & 1. Static Split & 71.6 $\pm$ 5.6 & 87.8 $\pm$ 10.0 & 84.7 & 76.8 & 53.1 $\pm$ 8.0 & 1,544 \\
- & 2. Rolling-Window (120d) & 87.2 $\pm$ 3.8 & 90.0 $\pm$ 10.0 & 89.8 & 94.7 & 77.8 $\pm$ 7.4 & 2,472 \\
- & 3. Locally Norm. Static & 90.3 $\pm$ 2.6 & 86.7 $\pm$ 7.2 & 91.5 & 91.4 & 90.7 $\pm$ 4.0 & 3,794 \\
- & 4. Plain ACI & 88.5 $\pm$ 3.2 & 90.0 $\pm$ 7.8 & 88.1 & 91.4 & 85.2 $\pm$ 5.2 & 2,966 \\
- & 5. LN-ACI & 89.6 $\pm$ 2.6 & 87.8 $\pm$ 6.1 & 89.8 & 90.1 & 90.1 $\pm$ 4.6 & 3,603 \\
+\multirow{5}{*}{Ridge ($14 \times 117$)} & 1. Static Split & 71.6 $\pm$ 5.6 & 87.8 $\pm$ 10.0 & 84.7 $\pm$ 5.1 & 76.8 $\pm$ 8.3 & 53.1 $\pm$ 8.0 & 1,544 \\
+ & 2. Rolling-Window (120d) & 87.2 $\pm$ 3.8 & 90.0 $\pm$ 10.0 & 89.8 $\pm$ 5.1 & 94.7 $\pm$ 3.3 & 77.8 $\pm$ 7.4 & 2,472 \\
+ & 3. Locally Norm. Static & 90.3 $\pm$ 2.6 & 86.7 $\pm$ 7.2 & 91.5 $\pm$ 4.2 & 91.4 $\pm$ 4.6 & 90.7 $\pm$ 4.0 & 3,794 \\
+ & 4. Plain ACI & 88.5 $\pm$ 3.2 & 90.0 $\pm$ 7.8 & 88.1 $\pm$ 6.0 & 91.4 $\pm$ 5.6 & 85.2 $\pm$ 5.2 & 2,966 \\
+ & 5. LN-ACI & 89.6 $\pm$ 2.6 & 87.8 $\pm$ 6.1 & 89.8 $\pm$ 4.2 & 90.1 $\pm$ 5.3 & 90.1 $\pm$ 4.6 & 3,603 \\
 \bottomrule
 \end{tabular}%
 }
@@ -491,7 +491,7 @@ Tables~\ref{tab:conformal}--\ref{tab:conformal_seasonal} and Fig.~\ref{fig:confo
 \label{sec:audits}
 
 \paragraph{Architecture-Dependent Feature and PCA Ablation}
-Table~\ref{tab:ablation} and Fig.~\ref{fig:abl_reg}(a) evaluate feature and PCA ablations across all three representative families (\texttt{PatchTST-CM 3$\times$}, \texttt{Equal-Weight RNN}, and \texttt{Ridge}). Adding detrended $\text{CDD}_{25}$ and 3-day Eid flags yields modest test reductions on \texttt{PatchTST-CM} ($588.1 \to 581.6 \to 576.9$\,MW, paired $p = 0.033$) and \texttt{Equal-Weight RNN} ($610.6 \to 601.6 \to 596.3$\,MW, $p = 0.007$), and reduces \texttt{PatchTST-CM} Holiday MAE by $-127.6$\,MW ($1,044.7 \to 917.1$\,MW across four Eid cycles). Crucially, 95\%-variance PCA is \textbf{architecture-dependent}: it significantly degrades \texttt{PatchTST-CM} ($+79.5$\,MW, $p = 0.001$) and \texttt{Ridge} ($+33.5$\,MW), while leaving \texttt{Equal-Weight RNN} essentially unchanged ($596.3 \to 597.5$\,MW, $p = 0.333$).
+Table~\ref{tab:ablation} and Fig.~\ref{fig:abl_reg}(a) evaluate feature and PCA ablations across all three representative families (\texttt{PatchTST-CM 3$\times$}, \texttt{Equal-Weight RNN}, and \texttt{Ridge}). Adding detrended $\text{CDD}_{25}$ and 3-day Eid flags yields modest test reductions on \texttt{PatchTST-CM} ($588.1 \to 581.6 \to 576.9$\,MW, paired $p = 0.033$) and \texttt{Equal-Weight RNN} ($610.6 \to 601.6 \to 596.3$\,MW, $p = 0.007$), and reduces \texttt{PatchTST-CM} Holiday MAE by $-127.6$\,MW ($1,044.7 \to 917.1$\,MW across four Eid cycles). Crucially, 95\%-variance PCA degrades validation MAE across all three architectures prior to test evaluation (\texttt{Val-Cal} MAE: \texttt{PatchTST-CM} $296.3 \to 315.4$\,MW, \texttt{Equal-Weight RNN} $315.3 \to 330.7$\,MW, \texttt{Ridge} $344.6 \to 479.0$\,MW), supporting the no-PCA selection on validation alone. On the blind test set, PCA's effect is \textbf{architecture-dependent}: it significantly degrades \texttt{PatchTST-CM} ($+79.5$\,MW, $p = 0.001$) and \texttt{Ridge} ($+33.5$\,MW), while leaving \texttt{Equal-Weight RNN} essentially unchanged ($596.3 \to 597.5$\,MW, $p = 0.333$).
 
 \paragraph{Regimes, Paired Holiday/Eid Tests, and Lagged-Demand ($y_{t-1}$) Stratification}
 Table~\ref{tab:regime} and Fig.~\ref{fig:qual_events} summarize seasonal and calendar regimes. On the 41 Holiday/Eid days, \texttt{Ridge} attains the lowest point MAE (867.9\,MW vs. 884.2\,MW for \texttt{Equal-Weight RNN}, 894.1\,MW for \texttt{XGBoost-Diff}, and 910.9\,MW for \texttt{PatchTST-CM}); however, paired HLN-DM tests on $n=41$ days show \textbf{none of these Holiday/Eid differences are statistically significant} (\texttt{Ridge} vs. \texttt{PatchTST-CM}: $\Delta = -43.0$\,MW, 95\% CI $[-151.4, +34.5]$, $p = 0.366$; vs. \texttt{Equal-Weight RNN}: $p = 0.771$; vs. \texttt{XGBoost-Diff}: $p = 0.716$; vs. Weekday Persistence: $p = 0.089$).
@@ -501,8 +501,8 @@ To eliminate realized-target selection bias (which mechanically favors persisten
 \paragraph{Operational Sensitivity Audits (Validation Seasonality, Calendar Gaps, and Eid Jitter)}
 Three targeted sensitivity audits test protocol robustness:
 \begin{itemize}
-    \item \textbf{Summer-inclusive validation (full-year 2024 vs. \texttt{Val-ES}):} Selecting hyperparameters on full-year 2024 ($n=344$ days, including Summer 2024) chooses the identical \texttt{Ridge} $\alpha = 10$ (602.29\,MW) and selects $\text{lr} = 2.5\times10^{-3}$ for \texttt{PatchTST-CM (3$\times$)}, improving Seed-42 blind test MAE from 583.61 to 564.86\,MW---confirming that tuning on summer-free \texttt{Val-ES} did not inflate \texttt{PatchTST-CM} performance.
-    \item \textbf{Calendar-gap audit (420 gap-free vs. 42 gap-spanning test windows):} Because all three test gaps occur during mild autumn (September--November 2025), the 42 gap-spanning windows exhibit lower errors across all models (\texttt{PatchTST-CM} 409.6\,MW, \texttt{Ridge} 385.0\,MW, \texttt{Equal-Weight RNN} 406.3\,MW, Weekday Persistence 364.1\,MW) than the 420 gap-free windows (590.5, 624.0, 606.7, and 660.4\,MW), confirming that reporting gaps neither inflate reported test error nor distort model rankings.
+    \item \textbf{Summer-inclusive validation sensitivity (full-year 2024 vs. \texttt{Val-ES}):} Selecting hyperparameters on full-year 2024 ($n=344$ days, including Summer 2024) leaves \texttt{Ridge} $\alpha = 10$ unchanged (602.29\,MW) and shifts \texttt{PatchTST-CM (3$\times$)} from $\text{lr} = 10^{-3}$ to $2.5\times10^{-3}$ on Seed~42, reducing Seed-42 test MAE from 583.61 to 564.86\,MW. While limited to a single-seed check on two models, this indicates that summer-free \texttt{Val-ES} did not artificially favor \texttt{PatchTST-CM}.
+    \item \textbf{Calendar-gap audit (420 gap-free vs. 42 gap-spanning test windows):} Because all three test gaps occur during mild autumn (September--November 2025), the 42 gap-spanning windows exhibit lower errors across all models (\texttt{PatchTST-CM} 409.6\,MW, \texttt{Ridge} 385.0\,MW, \texttt{Equal-Weight RNN} 406.3\,MW, Weekday Persistence 364.1\,MW) than the 420 gap-free windows (590.5, 624.0, 606.7, and 660.4\,MW), showing that reporting gaps neither inflate reported test error nor alter model rankings.
     \item \textbf{Eid $\pm 1$-day lunar-sighting jitter (frozen Seed-42 models):} Shifting test Eid flags one day early ($-1$\,d) changes Holiday MAE by $-7.0$\,MW (\texttt{PatchTST-CM}), $+20.3$\,MW (\texttt{Ridge}), and $-19.0$\,MW (\texttt{Equal-Weight RNN}), whereas a one-day late shift ($+1$\,d) degrades Holiday MAE by $+32.9$, $+35.6$, and $+26.6$\,MW ($+0.1$ to $+2.7$\,MW overall).
 \end{itemize}
 
@@ -600,7 +600,7 @@ Extreme Peak ($>15$\,GW) & 159 & \textbf{613.5} & 647.6 & 656.0 & 697.9 & 950.7 
 \subsection{Same-Split 8-Division Forecasts and Multi-Horizon Convex Blend}
 Table~\ref{tab:divisional} and Fig.~\ref{fig:divisional} report 5-seed same-split forecasts across all eight administrative divisions alongside paired HLN-DM $p$-values. \texttt{Equal-Weight RNN} achieves lower MAE than \texttt{PatchTST-CM (3$\times$)} in all 8 divisions, with statistically significant margins ($p < 0.05$) in \textbf{7 of 8 divisions} (Rajshahi $p = 0.379$ is non-significant). However, \texttt{Equal-Weight RNN} does not uniformly dominate simpler models: \texttt{Ridge} (251.2\,MW) and \texttt{Single BiGRU} (256.1\,MW, $p=0.145$) match or edge ahead of \texttt{Equal-Weight RNN} (256.3\,MW) in Dhaka, while Weekday-Adjusted Persistence (73.0\,MW), \texttt{Ridge} (74.3\,MW), and \texttt{Single BiGRU} (86.7\,MW) all beat \texttt{Equal-Weight RNN} (90.4\,MW) in Chattogram ($p < 0.001$).
 
-Table~\ref{tab:multihorizon} and Fig.~\ref{fig:multihorizon} evaluate strictly causal multi-horizon forecasting ($h = 1, 3, 7, 14, 30$ days, 5 seeds) with per-horizon \texttt{Val-ES} Ridge tuning ($\alpha_h \in \{10, 50, 300, 1000, 50\}$), train-fit vs. train+val refit \texttt{Climatology+Trend}, and a validation-tuned \textbf{\texttt{Climatology+Ridge Convex Blend}} ($\hat{y}^{\text{blend}}_{t+h} = w_h \hat{y}^{\text{Ridge}}_{t+h} + (1 - w_h)\hat{y}^{\text{Clim}}_{t+h}$, $w_h \in [0, 1]$ chosen on \texttt{Val-ES}). Three findings stand out: (i) direct model skill over train-fit climatology \textbf{dissipates by about 7 days} ($h=7$: \texttt{PatchTST-CM} 1,098.9\,MW, \texttt{Equal-Weight RNN} 1,081.2\,MW, \texttt{Direct Ridge} 1,075.1\,MW vs. \texttt{Climatology+Trend} 1,072.5\,MW); (ii) the validation-tuned convex blend matches \texttt{Ridge} at $h=1$ ($w_1=1.00$, 602.3\,MW), outperforms all direct models and train-fit climatology at $h=3$ ($w_3=0.60$, 848.3\,MW), $h=7$ ($w_7=0.20$, 1,007.4\,MW), and $h=14$ ($w_{14}=0.20$, 1,011.8\,MW), and falls back to climatology at $h=30$ ($w_{30}=0.00$, 1,071.9\,MW) rather than drifting to 1,354--1,492\,MW; and (iii) refitting \texttt{Climatology+Trend} through the end of Validation lowers climatology error by $\sim$104\,MW (963.4--968.5\,MW), underscoring the importance of periodic trend recalibration at multi-week horizons.
+Table~\ref{tab:multihorizon} and Fig.~\ref{fig:multihorizon} evaluate strictly causal multi-horizon forecasting ($h = 1, 3, 7, 14, 30$ days, 5 seeds) with per-horizon \texttt{Val-ES} Ridge tuning ($\alpha_h \in \{10, 50, 300, 1000, 50\}$), train-fit vs. train+val refit \texttt{Climatology+Trend}, and a validation-tuned \textbf{\texttt{Climatology+Ridge Convex Blend}} ($\hat{y}^{\text{blend}}_{t+h} = w_h \hat{y}^{\text{Ridge}}_{t+h} + (1 - w_h)\hat{y}^{\text{Clim}}_{t+h}$, $w_h \in [0, 1]$ chosen on \texttt{Val-ES}). Three findings stand out: (i) direct model skill over train-fit climatology \textbf{dissipates by about 7 days} ($h=7$: \texttt{PatchTST-CM} 1,098.9\,MW, \texttt{Equal-Weight RNN} 1,081.2\,MW, \texttt{Direct Ridge} 1,075.1\,MW vs. \texttt{Climatology+Trend} 1,072.5\,MW); (ii) the validation-tuned convex blend matches \texttt{Ridge} at $h=1$ ($w_1=1.00$, 602.3\,MW), outperforms all direct models and train-fit climatology at $h=3$ ($w_3=0.60$, 848.3\,MW), $h=7$ ($w_7=0.20$, 1,007.4\,MW), and $h=14$ ($w_{14}=0.20$, 1,011.8\,MW), and falls back to climatology at $h=30$ ($w_{30}=0.00$, 1,071.9\,MW) rather than drifting to 1,354--1,492\,MW; and (iii) refitting \texttt{Climatology+Trend} through the end of Validation lowers climatology error by $\sim$104\,MW (963.4--968.5\,MW), outperforming the train-only blend at $h \ge 7$ days simply because the blend was restricted to train-only climatology for strict parity with train-only models; updating the climatology component prior to blending would capture this additional gain, while the non-monotonic \texttt{Direct Ridge} penalty at $h=30$ ($\alpha_{30}=50$ vs. $\alpha_{14}=1000$) reflects finite-sample noise on the 105-day \texttt{Val-ES} block at monthly lead times.
 
 \begin{table*}[t]
 \centering
@@ -757,9 +757,13 @@ BiLSTM-Attention & 615.06 & 673.26 & 579.32 & 602.39 & 611.62 & 616.33 $\pm$ 34.
 BiLSTM & 608.47 & 637.34 & 639.48 & 614.09 & 594.89 & 618.85 $\pm$ 19.18 & 600.45 \\
 BiGRU & 604.17 & 612.92 & 648.50 & 640.08 & 633.52 & 627.84 $\pm$ 18.65 & 601.78 \\
 Weekday-Adj. Persist. [Det.] & 633.43 & 633.43 & 633.43 & 633.43 & 633.43 & 633.43 $\pm$ 0.00 & 633.43 \\
+Hybrid BiLSTM-Attn-XGB & 620.86 & 700.47 & 606.73 & 601.22 & 641.78 & 634.21 $\pm$ 40.21 & 606.95 \\
+Hybrid BiGRU-XGBoost & 617.53 & 634.64 & 657.57 & 637.83 & 667.14 & 642.94 $\pm$ 19.62 & 622.29 \\
 PatchTST-RevIN (CI, 3$\times$) & 659.30 & 668.24 & 664.50 & 687.04 & 660.86 & 667.99 $\pm$ 11.20 & 660.68 \\
+CNN-BiGRU-Transformer & 782.80 & 669.58 & 633.83 & 693.18 & 697.22 & 695.32 $\pm$ 55.01 & 675.95 \\
 DLinear (CI) & 696.60 & 699.07 & 697.69 & 696.36 & 704.46 & 698.84 $\pm$ 3.32 & 695.49 \\
 MLP ($14 \times 117$) & 692.58 & 661.74 & 839.45 & 689.31 & 806.56 & 737.93 $\pm$ 79.44 & 707.85 \\
+Custom Transformer & 790.17 & 731.97 & 764.16 & 704.85 & 703.06 & 738.84 $\pm$ 37.94 & 708.88 \\
 \bottomrule
 \end{tabular}%
 }
